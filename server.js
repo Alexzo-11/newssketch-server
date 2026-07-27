@@ -13,7 +13,74 @@ const connectDB = require('./config/db');
 
 const app = express();
 
-// Connect to MongoDB (if URI exists)
+// ============================================
+// HEALTH & ROOT ROUTES - MUST BE BEFORE ANY OTHER ROUTES
+// ============================================
+
+// Root route
+app.get('/', (req, res) => {
+  res.json({
+    message: 'News Sketch API Server',
+    status: 'running',
+    version: '1.0.0',
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      auth: {
+        login: 'POST /api/auth/login',
+        me: 'GET /api/auth/me',
+        logout: 'POST /api/auth/logout'
+      },
+      posts: {
+        list: 'GET /api/posts',
+        create: 'POST /api/posts',
+        getBySlug: 'GET /api/posts/:slug',
+        getById: 'GET /api/posts/id/:id',
+        update: 'PUT /api/posts/id/:id',
+        delete: 'DELETE /api/posts/id/:id',
+        related: 'GET /api/posts/related'
+      },
+      categories: {
+        list: 'GET /api/categories',
+        create: 'POST /api/categories',
+        update: 'PUT /api/categories/:id',
+        delete: 'DELETE /api/categories/:id',
+        posts: 'GET /api/categories/:slug/posts'
+      },
+      comments: {
+        list: 'GET /api/comments',
+        create: 'POST /api/comments'
+      },
+      videos: {
+        list: 'GET /api/videos',
+        get: 'GET /api/videos/:id',
+        upload: 'POST /api/videos/upload',
+        youtube: 'POST /api/videos/youtube',
+        delete: 'DELETE /api/videos/:id'
+      },
+      search: 'GET /api/search',
+      admin: {
+        stats: 'GET /api/admin/stats'
+      },
+      test: 'GET /api/test',
+      health: 'GET /health'
+    }
+  });
+});
+
+// Health check
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    memory: process.memoryUsage()
+  });
+});
+
+// ============================================
+// CONNECT TO MONGODB
+// ============================================
+
 if (process.env.MONGODB_URI) {
   connectDB();
 } else {
@@ -27,8 +94,9 @@ if (!fs.existsSync(uploadDir)) {
 }
 
 // ============================================
-// MULTER CONFIGURATION FOR IMAGES
+// MULTER CONFIGURATION
 // ============================================
+
 const imageStorage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, uploadDir);
@@ -53,13 +121,10 @@ const imageFilter = (req, file, cb) => {
 
 const uploadImage = multer({
   storage: imageStorage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: imageFilter
 });
 
-// ============================================
-// MULTER CONFIGURATION FOR VIDEOS
-// ============================================
 const videoStorage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, uploadDir);
@@ -84,13 +149,14 @@ const videoFilter = (req, file, cb) => {
 
 const uploadVideo = multer({
   storage: videoStorage,
-  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB limit
+  limits: { fileSize: 500 * 1024 * 1024 },
   fileFilter: videoFilter
 });
 
 // ============================================
 // MIDDLEWARE
 // ============================================
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
@@ -100,12 +166,12 @@ app.use(cors({
 }));
 app.use(morgan('dev'));
 
-// Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ============================================
 // MOCK DATA
 // ============================================
+
 const mockPosts = [
   {
     _id: '1',
@@ -113,7 +179,7 @@ const mockPosts = [
     slug: 'getting-started-with-news-sketch',
     excerpt: 'Learn how to build a modern news platform with Next.js and Node.js',
     content: '<p>This is a sample article to help you get started with News Sketch.</p>',
-    image: { url: '/placeholder1.jpg' },
+    image: { url: '/placeholder.svg' },
     category: { _id: '1', name: 'Technology', slug: 'technology' },
     author: { _id: '1', name: 'Admin' },
     views: 151,
@@ -129,7 +195,7 @@ const mockPosts = [
     slug: 'building-rest-apis-with-express',
     excerpt: 'A comprehensive guide to building RESTful APIs with Express.js and MongoDB',
     content: '<p>Learn how to build robust APIs for your applications.</p>',
-    image: { url: '/placeholder2.jpg' },
+    image: { url: '/placeholder.svg' },
     category: { _id: '2', name: 'Development', slug: 'development' },
     author: { _id: '1', name: 'Admin' },
     views: 89,
@@ -145,7 +211,7 @@ const mockPosts = [
     slug: 'tailwind-css-tips-and-tricks',
     excerpt: 'Improve your workflow with these Tailwind CSS best practices',
     content: '<p>Discover powerful Tailwind CSS techniques for faster development.</p>',
-    image: { url: '/placeholder3.jpg' },
+    image: { url: '/placeholder.svg' },
     category: { _id: '1', name: 'Technology', slug: 'technology' },
     author: { _id: '1', name: 'Admin' },
     views: 210,
@@ -161,7 +227,7 @@ const mockPosts = [
     slug: 'next-js-15-features',
     excerpt: 'Explore the latest features in Next.js 15',
     content: '<p>Next.js 15 brings many exciting features.</p>',
-    image: { url: '/placeholder4.jpg' },
+    image: { url: '/placeholder.svg' },
     category: { _id: '2', name: 'Development', slug: 'development' },
     author: { _id: '1', name: 'Admin' },
     views: 75,
@@ -266,7 +332,6 @@ app.post('/api/auth/logout', (req, res) => {
 // POST ROUTES
 // ============================================
 
-// GET all posts
 app.get('/api/posts', (req, res) => {
   const { page = 1, limit = 10, category } = req.query;
   let posts = [...mockPosts];
@@ -287,7 +352,6 @@ app.get('/api/posts', (req, res) => {
   });
 });
 
-// GET related posts
 app.get('/api/posts/related', (req, res) => {
   const { category, exclude } = req.query;
   
@@ -303,7 +367,6 @@ app.get('/api/posts/related', (req, res) => {
   res.json(posts.slice(0, 3));
 });
 
-// GET single post by slug
 app.get('/api/posts/:slug', (req, res) => {
   const slug = req.params.slug;
   const post = mockPosts.find(p => p.slug === slug);
@@ -314,7 +377,6 @@ app.get('/api/posts/:slug', (req, res) => {
   res.json(post);
 });
 
-// GET post by ID (for editing)
 app.get('/api/posts/id/:id', (req, res) => {
   const post = mockPosts.find(p => p._id === req.params.id);
   if (!post) {
@@ -323,7 +385,6 @@ app.get('/api/posts/id/:id', (req, res) => {
   res.json(post);
 });
 
-// POST create new post
 app.post('/api/posts', uploadImage.single('image'), (req, res) => {
   console.log('📡 POST /api/posts - Creating new post');
   console.log('📦 Request body:', req.body);
@@ -332,7 +393,6 @@ app.post('/api/posts', uploadImage.single('image'), (req, res) => {
   try {
     const { title, content, category, tags, metaTitle, metaDescription, slug: customSlug } = req.body;
     
-    // Validate required fields
     if (!title) {
       return res.status(400).json({ message: 'Title is required' });
     }
@@ -343,7 +403,6 @@ app.post('/api/posts', uploadImage.single('image'), (req, res) => {
       return res.status(400).json({ message: 'Category is required' });
     }
     
-    // Parse tags
     let parsedTags = tags;
     if (typeof tags === 'string') {
       try {
@@ -353,10 +412,8 @@ app.post('/api/posts', uploadImage.single('image'), (req, res) => {
       }
     }
     
-    // Find category
     const categoryObj = mockCategories.find(c => c._id === category);
     
-    // Handle image
     let imageUrl = '/placeholder.svg';
     let publicId = 'placeholder';
     if (req.file) {
@@ -364,7 +421,6 @@ app.post('/api/posts', uploadImage.single('image'), (req, res) => {
       publicId = req.file.filename;
     }
     
-    // Create new post
     const newPost = {
       _id: String(mockPosts.length + 1),
       title: title,
@@ -400,7 +456,6 @@ app.post('/api/posts', uploadImage.single('image'), (req, res) => {
   }
 });
 
-// PUT update post
 app.put('/api/posts/id/:id', uploadImage.single('image'), (req, res) => {
   const { id } = req.params;
   console.log('📡 PUT /api/posts/id/:id:', id);
@@ -438,7 +493,6 @@ app.put('/api/posts/id/:id', uploadImage.single('image'), (req, res) => {
   res.json(mockPosts[index]);
 });
 
-// DELETE post
 app.delete('/api/posts/id/:id', (req, res) => {
   const { id } = req.params;
   console.log('📡 DELETE /api/posts/id/:id:', id);
@@ -535,7 +589,6 @@ app.post('/api/comments', (req, res) => {
 // VIDEO ROUTES
 // ============================================
 
-// Get all videos
 app.get('/api/videos', (req, res) => {
   const { page = 1, limit = 10, type } = req.query;
   let videos = [...mockVideos];
@@ -556,7 +609,6 @@ app.get('/api/videos', (req, res) => {
   });
 });
 
-// Get single video
 app.get('/api/videos/:id', (req, res) => {
   const video = mockVideos.find(v => v._id === req.params.id);
   if (!video) {
@@ -566,7 +618,6 @@ app.get('/api/videos/:id', (req, res) => {
   res.json(video);
 });
 
-// Upload video
 app.post('/api/videos/upload', uploadVideo.single('video'), (req, res) => {
   console.log('📡 POST /api/videos/upload');
   console.log('📦 Request body:', req.body);
@@ -580,7 +631,6 @@ app.post('/api/videos/upload', uploadVideo.single('video'), (req, res) => {
   const { title, description } = req.body;
   
   if (!title) {
-    // Clean up uploaded file if exists
     if (req.file) {
       fs.unlink(req.file.path, (err) => {
         if (err) console.error('Error deleting file:', err);
@@ -608,7 +658,6 @@ app.post('/api/videos/upload', uploadVideo.single('video'), (req, res) => {
   res.status(201).json(newVideo);
 });
 
-// Add YouTube video
 app.post('/api/videos/youtube', (req, res) => {
   console.log('📡 POST /api/videos/youtube');
   console.log('📦 Request body:', req.body);
@@ -622,7 +671,6 @@ app.post('/api/videos/youtube', (req, res) => {
     return res.status(400).json({ message: 'YouTube URL is required' });
   }
   
-  // Extract YouTube video ID
   const youtubeRegex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
   const match = youtubeUrl.match(youtubeRegex);
   
@@ -651,7 +699,6 @@ app.post('/api/videos/youtube', (req, res) => {
   res.status(201).json(newVideo);
 });
 
-// Delete video
 app.delete('/api/videos/:id', (req, res) => {
   console.log('📡 DELETE /api/videos/:id:', req.params.id);
   
@@ -762,14 +809,6 @@ app.get('/api/test', (req, res) => {
 // ============================================
 // 404 HANDLER
 // ============================================
-// Add this route before the 404 handler
-app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  });
-});
 
 app.use((req, res) => {
   console.log(`❌ 404: ${req.method} ${req.originalUrl}`);
@@ -821,13 +860,14 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`\n🚀 Server running on http://localhost:${PORT}`);
   console.log(`📡 Test API: http://localhost:${PORT}/api/test`);
+  console.log(`💚 Health Check: http://localhost:${PORT}/health`);
   console.log(`📊 Admin Stats: http://localhost:${PORT}/api/admin/stats`);
   console.log(`\n📋 Available endpoints:`);
-  console.log(`   ─── AUTH ───`);
+  console.log(`   GET  /`);
+  console.log(`   GET  /health`);
+  console.log(`   GET  /api/test`);
   console.log(`   POST /api/auth/login`);
   console.log(`   GET  /api/auth/me`);
-  console.log(`   POST /api/auth/logout`);
-  console.log(`   ─── POSTS ───`);
   console.log(`   GET  /api/posts`);
   console.log(`   GET  /api/posts/:slug`);
   console.log(`   GET  /api/posts/id/:id`);
@@ -835,24 +875,16 @@ app.listen(PORT, () => {
   console.log(`   POST /api/posts`);
   console.log(`   PUT  /api/posts/id/:id`);
   console.log(`   DELETE /api/posts/id/:id`);
-  console.log(`   ─── CATEGORIES ───`);
   console.log(`   GET  /api/categories`);
   console.log(`   GET  /api/categories/:slug/posts`);
-  console.log(`   POST /api/categories`);
-  console.log(`   PUT  /api/categories/:id`);
-  console.log(`   DELETE /api/categories/:id`);
-  console.log(`   ─── COMMENTS ───`);
   console.log(`   GET  /api/comments`);
   console.log(`   POST /api/comments`);
-  console.log(`   ─── VIDEOS ───`);
   console.log(`   GET  /api/videos`);
   console.log(`   GET  /api/videos/:id`);
   console.log(`   POST /api/videos/upload`);
   console.log(`   POST /api/videos/youtube`);
   console.log(`   DELETE /api/videos/:id`);
-  console.log(`   ─── OTHER ───`);
   console.log(`   GET  /api/search`);
   console.log(`   GET  /api/admin/stats`);
-  console.log(`   GET  /api/test`);
-  console.log(`\n💡 Try: http://localhost:${PORT}/api/posts\n`);
+  console.log(`\n💡 Try: http://localhost:${PORT}/api/test\n`);
 });
