@@ -13,7 +13,7 @@ dotenv.config({ path: path.join(__dirname, '.env') });
 const app = express();
 
 // ============================================
-// CORS CONFIGURATION - FIXED
+// CORS CONFIGURATION - FIXED VERSION
 // ============================================
 
 const allowedOrigins = [
@@ -23,57 +23,44 @@ const allowedOrigins = [
   'http://localhost:3001',
   'https://*.vercel.app',
   'https://*.onrender.com',
-  process.env.RENDER_EXTERNAL_URL || '',
 ];
 
-// Configure CORS
-app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) {
-      return callback(null, true);
-    }
-    
-    // Check if the origin is allowed
-    const isAllowed = allowedOrigins.some(allowed => {
+// Custom CORS middleware - handles everything including preflight
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  
+  // Check if origin is allowed
+  let isAllowed = false;
+  if (!origin) {
+    isAllowed = true; // Allow requests with no origin (like curl)
+  } else {
+    isAllowed = allowedOrigins.some(allowed => {
       if (!allowed) return false;
-      // Handle wildcard *.vercel.app
       if (allowed.includes('*')) {
         const pattern = allowed.replace('*', '.*');
         const regex = new RegExp(`^${pattern}$`);
         return regex.test(origin);
       }
-      // Exact match (remove trailing slash for comparison)
-      return origin.replace(/\/$/, '') === allowed.replace(/\/$/, '');
+      return origin === allowed || origin === allowed.replace(/\/$/, '');
     });
-    
-    if (isAllowed) {
-      callback(null, true);
-    } else {
-      console.log('❌ CORS blocked for origin:', origin);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'X-Requested-With', 'Accept'],
-  exposedHeaders: ['Set-Cookie', 'Cookie'],
-}));
-
-// ============================================
-// FIX: Handle preflight requests without using '*'
-// ============================================
-app.all('*', function(req, res, next) {
+  }
+  
+  if (isAllowed && origin) {
+    res.header('Access-Control-Allow-Origin', origin);
+  } else if (!origin) {
+    res.header('Access-Control-Allow-Origin', '*');
+  }
+  
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Cookie, X-Requested-With, Accept');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Max-Age', '86400');
+  
   // Handle preflight requests
   if (req.method === 'OPTIONS') {
-    const origin = req.headers.origin || '*';
-    res.header('Access-Control-Allow-Origin', origin);
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Cookie, X-Requested-With, Accept');
-    res.header('Access-Control-Allow-Credentials', 'true');
-    res.header('Access-Control-Max-Age', '86400'); // 24 hours
     return res.sendStatus(200);
   }
+  
   next();
 });
 
@@ -157,26 +144,17 @@ app.get('/health', (req, res) => {
 
 let isConnected = false;
 
-const connectDB = async () => {
-  try {
-    if (!process.env.MONGODB_URI) {
-      console.log('⏭️  Skipping MongoDB connection (no URI provided)');
-      return;
-    }
-    
-    console.log('📡 Attempting to connect to MongoDB...');
-    const conn = await mongoose.connect(process.env.MONGODB_URI);
-    isConnected = true;
-    console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
-    console.log(`📦 Database: ${conn.connection.name}`);
-  } catch (error) {
-    console.error(`❌ MongoDB Connection Error: ${error.message}`);
-    isConnected = false;
-  }
-};
-
 if (process.env.MONGODB_URI) {
-  connectDB();
+  mongoose.connect(process.env.MONGODB_URI)
+    .then((conn) => {
+      isConnected = true;
+      console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
+      console.log(`📦 Database: ${conn.connection.name}`);
+    })
+    .catch((error) => {
+      console.error(`❌ MongoDB Connection Error: ${error.message}`);
+      isConnected = false;
+    });
 } else {
   console.log('⏭️  Skipping MongoDB connection (no URI provided)');
 }
@@ -267,7 +245,7 @@ const mockPosts = [
     slug: 'getting-started-with-news-sketch',
     excerpt: 'Learn how to build a modern news platform with Next.js and Node.js',
     content: '<p>This is a sample article to help you get started with News Sketch.</p>',
-    image: { url: '/placeholder1.jpg' },
+    image: { url: '/placeholder.jpg' },
     category: { _id: '1', name: 'Technology', slug: 'technology' },
     author: { _id: '1', name: 'Admin' },
     views: 151,
