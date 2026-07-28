@@ -13,7 +13,7 @@ dotenv.config({ path: path.join(__dirname, '.env') });
 const app = express();
 
 // ============================================
-// CORS CONFIGURATION - FIXED FOR VERCEL
+// CORS CONFIGURATION - FIXED
 // ============================================
 
 const allowedOrigins = [
@@ -51,7 +51,6 @@ app.use(cors({
       callback(null, true);
     } else {
       console.log('❌ CORS blocked for origin:', origin);
-      console.log('✅ Allowed origins:', allowedOrigins);
       callback(new Error('Not allowed by CORS'));
     }
   },
@@ -61,8 +60,22 @@ app.use(cors({
   exposedHeaders: ['Set-Cookie', 'Cookie'],
 }));
 
-// Handle preflight requests
-app.options('*', cors());
+// ============================================
+// FIX: Handle preflight requests without using '*'
+// ============================================
+app.all('*', function(req, res, next) {
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    const origin = req.headers.origin || '*';
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Cookie, X-Requested-With, Accept');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Max-Age', '86400'); // 24 hours
+    return res.sendStatus(200);
+  }
+  next();
+});
 
 // ============================================
 // HEALTH & ROOT ROUTES
@@ -162,7 +175,6 @@ const connectDB = async () => {
   }
 };
 
-// Connect to MongoDB if URI exists
 if (process.env.MONGODB_URI) {
   connectDB();
 } else {
@@ -173,13 +185,11 @@ if (process.env.MONGODB_URI) {
 // MULTER CONFIGURATION
 // ============================================
 
-// Create uploads directory
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Image upload configuration
 const imageStorage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, uploadDir);
@@ -208,7 +218,6 @@ const uploadImage = multer({
   fileFilter: imageFilter
 });
 
-// Video upload configuration
 const videoStorage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, uploadDir);
