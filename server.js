@@ -9,7 +9,6 @@ const multer = require('multer');
 const fs = require('fs');
 
 dotenv.config({ path: path.join(__dirname, '.env') });
-const connectDB = require('./config/db');
 
 const app = express();
 
@@ -17,14 +16,14 @@ const app = express();
 // CORS CONFIGURATION - FIXED FOR VERCEL
 // ============================================
 
-// List of allowed origins
 const allowedOrigins = [
   process.env.CLIENT_URL || 'http://localhost:3000',
   'https://newssketch-client.vercel.app',
   'http://localhost:3000',
   'http://localhost:3001',
   'https://*.vercel.app',
-  // Add any other frontend URLs here
+  'https://*.onrender.com',
+  process.env.RENDER_EXTERNAL_URL || '',
 ];
 
 // Configure CORS
@@ -37,6 +36,7 @@ app.use(cors({
     
     // Check if the origin is allowed
     const isAllowed = allowedOrigins.some(allowed => {
+      if (!allowed) return false;
       // Handle wildcard *.vercel.app
       if (allowed.includes('*')) {
         const pattern = allowed.replace('*', '.*');
@@ -68,7 +68,6 @@ app.options('*', cors());
 // HEALTH & ROOT ROUTES
 // ============================================
 
-// Root route
 app.get('/', (req, res) => {
   res.json({
     message: 'News Sketch API Server',
@@ -118,22 +117,23 @@ app.get('/', (req, res) => {
   });
 });
 
-// Health check
 app.get('/health', (req, res) => {
-  const dbStatus = mongoose.connection.readyState;
-  const statusMap = {
-    0: 'disconnected',
-    1: 'connected',
-    2: 'connecting',
-    3: 'disconnecting'
-  };
+  let dbStatus = 'disconnected';
+  if (mongoose.connection) {
+    const statusMap = {
+      0: 'disconnected',
+      1: 'connected',
+      2: 'connecting',
+      3: 'disconnecting'
+    };
+    dbStatus = statusMap[mongoose.connection.readyState] || 'unknown';
+  }
   
   res.status(200).json({ 
     status: 'OK', 
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
-    mongodb: statusMap[dbStatus] || 'unknown',
-    memory: process.memoryUsage(),
+    mongodb: dbStatus,
     environment: process.env.NODE_ENV || 'development'
   });
 });
@@ -142,22 +142,44 @@ app.get('/health', (req, res) => {
 // CONNECT TO MONGODB
 // ============================================
 
+let isConnected = false;
+
+const connectDB = async () => {
+  try {
+    if (!process.env.MONGODB_URI) {
+      console.log('⏭️  Skipping MongoDB connection (no URI provided)');
+      return;
+    }
+    
+    console.log('📡 Attempting to connect to MongoDB...');
+    const conn = await mongoose.connect(process.env.MONGODB_URI);
+    isConnected = true;
+    console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
+    console.log(`📦 Database: ${conn.connection.name}`);
+  } catch (error) {
+    console.error(`❌ MongoDB Connection Error: ${error.message}`);
+    isConnected = false;
+  }
+};
+
+// Connect to MongoDB if URI exists
 if (process.env.MONGODB_URI) {
   connectDB();
 } else {
   console.log('⏭️  Skipping MongoDB connection (no URI provided)');
 }
 
-// Create uploads directory if it doesn't exist
+// ============================================
+// MULTER CONFIGURATION
+// ============================================
+
+// Create uploads directory
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// ============================================
-// MULTER CONFIGURATION
-// ============================================
-
+// Image upload configuration
 const imageStorage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, uploadDir);
@@ -182,10 +204,11 @@ const imageFilter = (req, file, cb) => {
 
 const uploadImage = multer({
   storage: imageStorage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: imageFilter
 });
 
+// Video upload configuration
 const videoStorage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, uploadDir);
@@ -210,7 +233,7 @@ const videoFilter = (req, file, cb) => {
 
 const uploadVideo = multer({
   storage: videoStorage,
-  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB limit
+  limits: { fileSize: 500 * 1024 * 1024 },
   fileFilter: videoFilter
 });
 
@@ -222,8 +245,6 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(morgan('dev'));
-
-// Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ============================================
@@ -237,7 +258,7 @@ const mockPosts = [
     slug: 'getting-started-with-news-sketch',
     excerpt: 'Learn how to build a modern news platform with Next.js and Node.js',
     content: '<p>This is a sample article to help you get started with News Sketch.</p>',
-    image: { url: '/placeholder.svg' },
+    image: { url: '/placeholder1.jpg' },
     category: { _id: '1', name: 'Technology', slug: 'technology' },
     author: { _id: '1', name: 'Admin' },
     views: 151,
@@ -253,7 +274,7 @@ const mockPosts = [
     slug: 'building-rest-apis-with-express',
     excerpt: 'A comprehensive guide to building RESTful APIs with Express.js and MongoDB',
     content: '<p>Learn how to build robust APIs for your applications.</p>',
-    image: { url: '/placeholder.svg' },
+    image: { url: '/placeholder2.jpg' },
     category: { _id: '2', name: 'Development', slug: 'development' },
     author: { _id: '1', name: 'Admin' },
     views: 89,
@@ -269,7 +290,7 @@ const mockPosts = [
     slug: 'tailwind-css-tips-and-tricks',
     excerpt: 'Improve your workflow with these Tailwind CSS best practices',
     content: '<p>Discover powerful Tailwind CSS techniques for faster development.</p>',
-    image: { url: '/placeholder.svg' },
+    image: { url: '/placeholder3.jpg' },
     category: { _id: '1', name: 'Technology', slug: 'technology' },
     author: { _id: '1', name: 'Admin' },
     views: 210,
@@ -285,7 +306,7 @@ const mockPosts = [
     slug: 'next-js-15-features',
     excerpt: 'Explore the latest features in Next.js 15',
     content: '<p>Next.js 15 brings many exciting features.</p>',
-    image: { url: '/placeholder.svg' },
+    image: { url: '/placeholder4.jpg' },
     category: { _id: '2', name: 'Development', slug: 'development' },
     author: { _id: '1', name: 'Admin' },
     views: 75,
@@ -402,7 +423,6 @@ app.get('/api/posts', (req, res) => {
     posts = posts.filter(p => p.featured === true);
   }
   
-  // Apply sorting
   if (sort === '-views') {
     posts.sort((a, b) => b.views - a.views);
   } else if (sort === 'views') {
@@ -846,23 +866,15 @@ app.get('/api/admin/stats', (req, res) => {
 // ============================================
 
 app.get('/api/test', (req, res) => {
-  const dbStatus = mongoose.connection.readyState;
-  const statusMap = {
-    0: 'disconnected',
-    1: 'connected',
-    2: 'connecting',
-    3: 'disconnecting'
-  };
-  
   res.json({
     message: 'News Sketch API Server',
     status: 'running',
     timestamp: new Date().toISOString(),
-    mongodb: statusMap[dbStatus] || 'unknown',
+    mongodb: isConnected ? 'connected' : 'disconnected',
     postsCount: mockPosts.length,
     videosCount: mockVideos.length,
     cors: {
-      origins: allowedOrigins,
+      origins: allowedOrigins.filter(Boolean),
       credentials: true,
     },
     routes: {
@@ -962,6 +974,6 @@ app.listen(PORT, () => {
   console.log(`   DELETE /api/videos/:id`);
   console.log(`   GET  /api/search`);
   console.log(`   GET  /api/admin/stats`);
-  console.log(`\n✅ CORS configured for:`, allowedOrigins);
+  console.log(`\n✅ CORS configured for:`, allowedOrigins.filter(Boolean));
   console.log(`\n💡 Try: http://localhost:${PORT}/api/test\n`);
 });
