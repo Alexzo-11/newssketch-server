@@ -14,7 +14,58 @@ const connectDB = require('./config/db');
 const app = express();
 
 // ============================================
-// HEALTH & ROOT ROUTES - MUST BE BEFORE ANY OTHER ROUTES
+// CORS CONFIGURATION - FIXED FOR VERCEL
+// ============================================
+
+// List of allowed origins
+const allowedOrigins = [
+  process.env.CLIENT_URL || 'http://localhost:3000',
+  'https://newssketch-client.vercel.app',
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'https://*.vercel.app',
+  // Add any other frontend URLs here
+];
+
+// Configure CORS
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) {
+      return callback(null, true);
+    }
+    
+    // Check if the origin is allowed
+    const isAllowed = allowedOrigins.some(allowed => {
+      // Handle wildcard *.vercel.app
+      if (allowed.includes('*')) {
+        const pattern = allowed.replace('*', '.*');
+        const regex = new RegExp(`^${pattern}$`);
+        return regex.test(origin);
+      }
+      // Exact match (remove trailing slash for comparison)
+      return origin.replace(/\/$/, '') === allowed.replace(/\/$/, '');
+    });
+    
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      console.log('❌ CORS blocked for origin:', origin);
+      console.log('✅ Allowed origins:', allowedOrigins);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'X-Requested-With', 'Accept'],
+  exposedHeaders: ['Set-Cookie', 'Cookie'],
+}));
+
+// Handle preflight requests
+app.options('*', cors());
+
+// ============================================
+// HEALTH & ROOT ROUTES
 // ============================================
 
 // Root route
@@ -69,11 +120,21 @@ app.get('/', (req, res) => {
 
 // Health check
 app.get('/health', (req, res) => {
+  const dbStatus = mongoose.connection.readyState;
+  const statusMap = {
+    0: 'disconnected',
+    1: 'connected',
+    2: 'connecting',
+    3: 'disconnecting'
+  };
+  
   res.status(200).json({ 
     status: 'OK', 
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
-    memory: process.memoryUsage()
+    mongodb: statusMap[dbStatus] || 'unknown',
+    memory: process.memoryUsage(),
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
@@ -121,7 +182,7 @@ const imageFilter = (req, file, cb) => {
 
 const uploadImage = multer({
   storage: imageStorage,
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
   fileFilter: imageFilter
 });
 
@@ -149,7 +210,7 @@ const videoFilter = (req, file, cb) => {
 
 const uploadVideo = multer({
   storage: videoStorage,
-  limits: { fileSize: 500 * 1024 * 1024 },
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB limit
   fileFilter: videoFilter
 });
 
@@ -160,12 +221,9 @@ const uploadVideo = multer({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:3000',
-  credentials: true,
-}));
 app.use(morgan('dev'));
 
+// Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ============================================
@@ -333,11 +391,24 @@ app.post('/api/auth/logout', (req, res) => {
 // ============================================
 
 app.get('/api/posts', (req, res) => {
-  const { page = 1, limit = 10, category } = req.query;
+  const { page = 1, limit = 10, category, featured, sort = '-createdAt' } = req.query;
   let posts = [...mockPosts];
   
   if (category) {
     posts = posts.filter(p => p.category._id === category || p.category.slug === category);
+  }
+  
+  if (featured === 'true') {
+    posts = posts.filter(p => p.featured === true);
+  }
+  
+  // Apply sorting
+  if (sort === '-views') {
+    posts.sort((a, b) => b.views - a.views);
+  } else if (sort === 'views') {
+    posts.sort((a, b) => a.views - b.views);
+  } else if (sort === '-createdAt') {
+    posts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   }
   
   const start = (parseInt(page) - 1) * parseInt(limit);
@@ -790,6 +861,10 @@ app.get('/api/test', (req, res) => {
     mongodb: statusMap[dbStatus] || 'unknown',
     postsCount: mockPosts.length,
     videosCount: mockVideos.length,
+    cors: {
+      origins: allowedOrigins,
+      credentials: true,
+    },
     routes: {
       posts: '/api/posts',
       postBySlug: '/api/posts/:slug',
@@ -802,6 +877,7 @@ app.get('/api/test', (req, res) => {
       adminStats: '/api/admin/stats',
       auth: '/api/auth/login',
       test: '/api/test',
+      health: '/health'
     }
   });
 });
@@ -886,5 +962,6 @@ app.listen(PORT, () => {
   console.log(`   DELETE /api/videos/:id`);
   console.log(`   GET  /api/search`);
   console.log(`   GET  /api/admin/stats`);
+  console.log(`\n✅ CORS configured for:`, allowedOrigins);
   console.log(`\n💡 Try: http://localhost:${PORT}/api/test\n`);
 });
