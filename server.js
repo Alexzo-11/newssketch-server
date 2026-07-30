@@ -13,7 +13,11 @@ dotenv.config({ path: path.join(__dirname, '.env') });
 const app = express();
 
 // ============================================
+<<<<<<< HEAD
 // CORS CONFIGURATION - PRODUCTION READY
+=======
+// CORS CONFIGURATION - FIXED VERSION
+>>>>>>> 70262c0b91dd9cc414597347c644ba465d4f634b
 // ============================================
 
 const allowedOrigins = [
@@ -25,6 +29,7 @@ const allowedOrigins = [
   'https://*.onrender.com',
 ];
 
+<<<<<<< HEAD
 // Custom CORS middleware
 app.use((req, res, next) => {
   const origin = req.headers.origin;
@@ -32,6 +37,16 @@ app.use((req, res, next) => {
   let isAllowed = false;
   if (!origin) {
     isAllowed = true;
+=======
+// Custom CORS middleware - handles everything including preflight
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  
+  // Check if origin is allowed
+  let isAllowed = false;
+  if (!origin) {
+    isAllowed = true; // Allow requests with no origin (like curl)
+>>>>>>> 70262c0b91dd9cc414597347c644ba465d4f634b
   } else {
     isAllowed = allowedOrigins.some(allowed => {
       if (!allowed) return false;
@@ -55,6 +70,10 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Max-Age', '86400');
   
+<<<<<<< HEAD
+=======
+  // Handle preflight requests
+>>>>>>> 70262c0b91dd9cc414597347c644ba465d4f634b
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
@@ -243,7 +262,11 @@ const mockPosts = [
     slug: 'getting-started-with-news-sketch',
     excerpt: 'Learn how to build a modern news platform with Next.js and Node.js',
     content: '<p>This is a sample article to help you get started with News Sketch.</p>',
+<<<<<<< HEAD
     image: { url: 'https://via.placeholder.com/800x400/3C4043/FFFFFF?text=News+Sketch'  },
+=======
+    image: { url: '/placeholder.jpg' },
+>>>>>>> 70262c0b91dd9cc414597347c644ba465d4f634b
     category: { _id: '1', name: 'Technology', slug: 'technology' },
     author: { _id: '1', name: 'Admin' },
     views: 151,
@@ -393,7 +416,14 @@ app.post('/api/auth/logout', (req, res) => {
   res.json({ message: 'Logged out successfully' });
 });
 
+<<<<<<< HEAD
 // --- POST ROUTES ---
+=======
+// ============================================
+// POST ROUTES
+// ============================================
+
+>>>>>>> 70262c0b91dd9cc414597347c644ba465d4f634b
 app.get('/api/posts', (req, res) => {
   const { page = 1, limit = 10, category, featured, sort = '-createdAt' } = req.query;
   let posts = [...mockPosts];
@@ -408,6 +438,11 @@ app.get('/api/posts', (req, res) => {
   
   if (sort === '-views') {
     posts.sort((a, b) => b.views - a.views);
+<<<<<<< HEAD
+=======
+  } else if (sort === 'views') {
+    posts.sort((a, b) => a.views - b.views);
+>>>>>>> 70262c0b91dd9cc414597347c644ba465d4f634b
   } else if (sort === '-createdAt') {
     posts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   }
@@ -651,7 +686,14 @@ app.post('/api/comments', (req, res) => {
   res.status(201).json(newComment);
 });
 
+<<<<<<< HEAD
 // --- VIDEO ROUTES ---
+=======
+// ============================================
+// VIDEO ROUTES
+// ============================================
+
+>>>>>>> 70262c0b91dd9cc414597347c644ba465d4f634b
 app.get('/api/videos', (req, res) => {
   const { page = 1, limit = 10, type } = req.query;
   let videos = [...mockVideos];
@@ -939,4 +981,8 @@ app.listen(PORT, () => {
   console.log(`   GET  /api/admin/stats`);
   console.log(`\n✅ CORS configured for:`, allowedOrigins.filter(Boolean));
   console.log(`\n💡 Try: http://localhost:${PORT}/api/test\n`);
+<<<<<<< HEAD
 });
+=======
+});
+>>>>>>> 70262c0b91dd9cc414597347c644ba465d4f634b
