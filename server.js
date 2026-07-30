@@ -9,26 +9,163 @@ const multer = require('multer');
 const fs = require('fs');
 
 dotenv.config({ path: path.join(__dirname, '.env') });
-const connectDB = require('./config/db');
 
 const app = express();
 
-// Connect to MongoDB (if URI exists)
+// ============================================
+// CORS CONFIGURATION - PRODUCTION READY
+// ============================================
+
+const allowedOrigins = [
+  process.env.CLIENT_URL || 'http://localhost:3000',
+  'https://newssketch-client.vercel.app',
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'https://*.vercel.app',
+  'https://*.onrender.com',
+];
+
+// Custom CORS middleware
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  
+  let isAllowed = false;
+  if (!origin) {
+    isAllowed = true;
+  } else {
+    isAllowed = allowedOrigins.some(allowed => {
+      if (!allowed) return false;
+      if (allowed.includes('*')) {
+        const pattern = allowed.replace('*', '.*');
+        const regex = new RegExp(`^${pattern}$`);
+        return regex.test(origin);
+      }
+      return origin === allowed || origin === allowed.replace(/\/$/, '');
+    });
+  }
+  
+  if (isAllowed && origin) {
+    res.header('Access-Control-Allow-Origin', origin);
+  } else if (!origin) {
+    res.header('Access-Control-Allow-Origin', '*');
+  }
+  
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Cookie, X-Requested-With, Accept');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Max-Age', '86400');
+  
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  
+  next();
+});
+
+// ============================================
+// HEALTH & ROOT ROUTES
+// ============================================
+
+app.get('/', (req, res) => {
+  res.json({
+    message: 'News Sketch API Server',
+    status: 'running',
+    version: '1.0.0',
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      auth: {
+        login: 'POST /api/auth/login',
+        me: 'GET /api/auth/me',
+        logout: 'POST /api/auth/logout'
+      },
+      posts: {
+        list: 'GET /api/posts',
+        create: 'POST /api/posts',
+        getBySlug: 'GET /api/posts/:slug',
+        getById: 'GET /api/posts/id/:id',
+        update: 'PUT /api/posts/id/:id',
+        delete: 'DELETE /api/posts/id/:id',
+        related: 'GET /api/posts/related'
+      },
+      categories: {
+        list: 'GET /api/categories',
+        create: 'POST /api/categories',
+        update: 'PUT /api/categories/:id',
+        delete: 'DELETE /api/categories/:id',
+        posts: 'GET /api/categories/:slug/posts'
+      },
+      comments: {
+        list: 'GET /api/comments',
+        create: 'POST /api/comments'
+      },
+      videos: {
+        list: 'GET /api/videos',
+        get: 'GET /api/videos/:id',
+        upload: 'POST /api/videos/upload',
+        youtube: 'POST /api/videos/youtube',
+        delete: 'DELETE /api/videos/:id'
+      },
+      search: 'GET /api/search',
+      admin: {
+        stats: 'GET /api/admin/stats'
+      },
+      test: 'GET /api/test',
+      health: 'GET /health'
+    }
+  });
+});
+
+app.get('/health', (req, res) => {
+  let dbStatus = 'disconnected';
+  if (mongoose.connection) {
+    const statusMap = {
+      0: 'disconnected',
+      1: 'connected',
+      2: 'connecting',
+      3: 'disconnecting'
+    };
+    dbStatus = statusMap[mongoose.connection.readyState] || 'unknown';
+  }
+  
+  res.status(200).json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    mongodb: dbStatus,
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
+// ============================================
+// CONNECT TO MONGODB
+// ============================================
+
+let isConnected = false;
+
 if (process.env.MONGODB_URI) {
-  connectDB();
+  mongoose.connect(process.env.MONGODB_URI)
+    .then((conn) => {
+      isConnected = true;
+      console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
+      console.log(`📦 Database: ${conn.connection.name}`);
+    })
+    .catch((error) => {
+      console.error(`❌ MongoDB Connection Error: ${error.message}`);
+      isConnected = false;
+    });
 } else {
   console.log('⏭️  Skipping MongoDB connection (no URI provided)');
 }
 
-// Create uploads directory if it doesn't exist
+// ============================================
+// MULTER CONFIGURATION
+// ============================================
+
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// ============================================
-// MULTER CONFIGURATION FOR IMAGES
-// ============================================
 const imageStorage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, uploadDir);
@@ -53,13 +190,10 @@ const imageFilter = (req, file, cb) => {
 
 const uploadImage = multer({
   storage: imageStorage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: imageFilter
 });
 
-// ============================================
-// MULTER CONFIGURATION FOR VIDEOS
-// ============================================
 const videoStorage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, uploadDir);
@@ -84,28 +218,24 @@ const videoFilter = (req, file, cb) => {
 
 const uploadVideo = multer({
   storage: videoStorage,
-  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB limit
+  limits: { fileSize: 500 * 1024 * 1024 },
   fileFilter: videoFilter
 });
 
 // ============================================
 // MIDDLEWARE
 // ============================================
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:3000',
-  credentials: true,
-}));
 app.use(morgan('dev'));
-
-// Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ============================================
-// MOCK DATA
+// MOCK DATA (Same as before)
 // ============================================
+
 const mockPosts = [
   {
     _id: '1',
@@ -113,7 +243,7 @@ const mockPosts = [
     slug: 'getting-started-with-news-sketch',
     excerpt: 'Learn how to build a modern news platform with Next.js and Node.js',
     content: '<p>This is a sample article to help you get started with News Sketch.</p>',
-    image: { url: '/placeholder1.jpg' },
+    image: { url: 'https://via.placeholder.com/800x400/3C4043/FFFFFF?text=News+Sketch'  },
     category: { _id: '1', name: 'Technology', slug: 'technology' },
     author: { _id: '1', name: 'Admin' },
     views: 151,
@@ -129,7 +259,7 @@ const mockPosts = [
     slug: 'building-rest-apis-with-express',
     excerpt: 'A comprehensive guide to building RESTful APIs with Express.js and MongoDB',
     content: '<p>Learn how to build robust APIs for your applications.</p>',
-    image: { url: '/placeholder2.jpg' },
+    image: { url: 'https://via.placeholder.com/800x400/3C4043/FFFFFF?text=News+Sketch'  },
     category: { _id: '2', name: 'Development', slug: 'development' },
     author: { _id: '1', name: 'Admin' },
     views: 89,
@@ -145,7 +275,7 @@ const mockPosts = [
     slug: 'tailwind-css-tips-and-tricks',
     excerpt: 'Improve your workflow with these Tailwind CSS best practices',
     content: '<p>Discover powerful Tailwind CSS techniques for faster development.</p>',
-    image: { url: '/placeholder3.jpg' },
+    image: {url: 'https://via.placeholder.com/800x400/3C4043/FFFFFF?text=News+Sketch'  },
     category: { _id: '1', name: 'Technology', slug: 'technology' },
     author: { _id: '1', name: 'Admin' },
     views: 210,
@@ -161,7 +291,7 @@ const mockPosts = [
     slug: 'next-js-15-features',
     excerpt: 'Explore the latest features in Next.js 15',
     content: '<p>Next.js 15 brings many exciting features.</p>',
-    image: { url: '/placeholder4.jpg' },
+    image: { url: 'https://via.placeholder.com/800x400/3C4043/FFFFFF?text=News+Sketch'  },
     category: { _id: '2', name: 'Development', slug: 'development' },
     author: { _id: '1', name: 'Admin' },
     views: 75,
@@ -227,9 +357,10 @@ const mockVideos = [
 ];
 
 // ============================================
-// AUTH ROUTES
+// ALL ROUTES (Auth, Posts, Categories, Comments, Videos, Search, Admin Stats, Test)
 // ============================================
 
+// --- AUTH ROUTES ---
 app.post('/api/auth/login', (req, res) => {
   const { email, password } = req.body;
   console.log('📡 Login attempt:', email);
@@ -262,17 +393,23 @@ app.post('/api/auth/logout', (req, res) => {
   res.json({ message: 'Logged out successfully' });
 });
 
-// ============================================
-// POST ROUTES
-// ============================================
-
-// GET all posts
+// --- POST ROUTES ---
 app.get('/api/posts', (req, res) => {
-  const { page = 1, limit = 10, category } = req.query;
+  const { page = 1, limit = 10, category, featured, sort = '-createdAt' } = req.query;
   let posts = [...mockPosts];
   
   if (category) {
     posts = posts.filter(p => p.category._id === category || p.category.slug === category);
+  }
+  
+  if (featured === 'true') {
+    posts = posts.filter(p => p.featured === true);
+  }
+  
+  if (sort === '-views') {
+    posts.sort((a, b) => b.views - a.views);
+  } else if (sort === '-createdAt') {
+    posts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   }
   
   const start = (parseInt(page) - 1) * parseInt(limit);
@@ -287,7 +424,6 @@ app.get('/api/posts', (req, res) => {
   });
 });
 
-// GET related posts
 app.get('/api/posts/related', (req, res) => {
   const { category, exclude } = req.query;
   
@@ -303,7 +439,6 @@ app.get('/api/posts/related', (req, res) => {
   res.json(posts.slice(0, 3));
 });
 
-// GET single post by slug
 app.get('/api/posts/:slug', (req, res) => {
   const slug = req.params.slug;
   const post = mockPosts.find(p => p.slug === slug);
@@ -314,7 +449,6 @@ app.get('/api/posts/:slug', (req, res) => {
   res.json(post);
 });
 
-// GET post by ID (for editing)
 app.get('/api/posts/id/:id', (req, res) => {
   const post = mockPosts.find(p => p._id === req.params.id);
   if (!post) {
@@ -323,7 +457,6 @@ app.get('/api/posts/id/:id', (req, res) => {
   res.json(post);
 });
 
-// POST create new post
 app.post('/api/posts', uploadImage.single('image'), (req, res) => {
   console.log('📡 POST /api/posts - Creating new post');
   console.log('📦 Request body:', req.body);
@@ -332,7 +465,6 @@ app.post('/api/posts', uploadImage.single('image'), (req, res) => {
   try {
     const { title, content, category, tags, metaTitle, metaDescription, slug: customSlug } = req.body;
     
-    // Validate required fields
     if (!title) {
       return res.status(400).json({ message: 'Title is required' });
     }
@@ -343,7 +475,6 @@ app.post('/api/posts', uploadImage.single('image'), (req, res) => {
       return res.status(400).json({ message: 'Category is required' });
     }
     
-    // Parse tags
     let parsedTags = tags;
     if (typeof tags === 'string') {
       try {
@@ -353,10 +484,8 @@ app.post('/api/posts', uploadImage.single('image'), (req, res) => {
       }
     }
     
-    // Find category
     const categoryObj = mockCategories.find(c => c._id === category);
     
-    // Handle image
     let imageUrl = '/placeholder.svg';
     let publicId = 'placeholder';
     if (req.file) {
@@ -364,7 +493,6 @@ app.post('/api/posts', uploadImage.single('image'), (req, res) => {
       publicId = req.file.filename;
     }
     
-    // Create new post
     const newPost = {
       _id: String(mockPosts.length + 1),
       title: title,
@@ -400,7 +528,6 @@ app.post('/api/posts', uploadImage.single('image'), (req, res) => {
   }
 });
 
-// PUT update post
 app.put('/api/posts/id/:id', uploadImage.single('image'), (req, res) => {
   const { id } = req.params;
   console.log('📡 PUT /api/posts/id/:id:', id);
@@ -438,7 +565,6 @@ app.put('/api/posts/id/:id', uploadImage.single('image'), (req, res) => {
   res.json(mockPosts[index]);
 });
 
-// DELETE post
 app.delete('/api/posts/id/:id', (req, res) => {
   const { id } = req.params;
   console.log('📡 DELETE /api/posts/id/:id:', id);
@@ -453,10 +579,7 @@ app.delete('/api/posts/id/:id', (req, res) => {
   res.json({ message: 'Post deleted successfully' });
 });
 
-// ============================================
-// CATEGORY ROUTES
-// ============================================
-
+// --- CATEGORY ROUTES ---
 app.get('/api/categories', (req, res) => {
   res.json(mockCategories);
 });
@@ -502,10 +625,7 @@ app.delete('/api/categories/:id', (req, res) => {
   res.json({ message: 'Category deleted successfully' });
 });
 
-// ============================================
-// COMMENT ROUTES
-// ============================================
-
+// --- COMMENT ROUTES ---
 app.get('/api/comments', (req, res) => {
   const { post } = req.query;
   let comments = [...mockComments];
@@ -531,11 +651,7 @@ app.post('/api/comments', (req, res) => {
   res.status(201).json(newComment);
 });
 
-// ============================================
-// VIDEO ROUTES
-// ============================================
-
-// Get all videos
+// --- VIDEO ROUTES ---
 app.get('/api/videos', (req, res) => {
   const { page = 1, limit = 10, type } = req.query;
   let videos = [...mockVideos];
@@ -556,7 +672,6 @@ app.get('/api/videos', (req, res) => {
   });
 });
 
-// Get single video
 app.get('/api/videos/:id', (req, res) => {
   const video = mockVideos.find(v => v._id === req.params.id);
   if (!video) {
@@ -566,7 +681,6 @@ app.get('/api/videos/:id', (req, res) => {
   res.json(video);
 });
 
-// Upload video
 app.post('/api/videos/upload', uploadVideo.single('video'), (req, res) => {
   console.log('📡 POST /api/videos/upload');
   console.log('📦 Request body:', req.body);
@@ -580,7 +694,6 @@ app.post('/api/videos/upload', uploadVideo.single('video'), (req, res) => {
   const { title, description } = req.body;
   
   if (!title) {
-    // Clean up uploaded file if exists
     if (req.file) {
       fs.unlink(req.file.path, (err) => {
         if (err) console.error('Error deleting file:', err);
@@ -608,7 +721,6 @@ app.post('/api/videos/upload', uploadVideo.single('video'), (req, res) => {
   res.status(201).json(newVideo);
 });
 
-// Add YouTube video
 app.post('/api/videos/youtube', (req, res) => {
   console.log('📡 POST /api/videos/youtube');
   console.log('📦 Request body:', req.body);
@@ -622,7 +734,6 @@ app.post('/api/videos/youtube', (req, res) => {
     return res.status(400).json({ message: 'YouTube URL is required' });
   }
   
-  // Extract YouTube video ID
   const youtubeRegex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
   const match = youtubeUrl.match(youtubeRegex);
   
@@ -651,7 +762,6 @@ app.post('/api/videos/youtube', (req, res) => {
   res.status(201).json(newVideo);
 });
 
-// Delete video
 app.delete('/api/videos/:id', (req, res) => {
   console.log('📡 DELETE /api/videos/:id:', req.params.id);
   
@@ -665,10 +775,7 @@ app.delete('/api/videos/:id', (req, res) => {
   res.json({ message: 'Video deleted successfully' });
 });
 
-// ============================================
-// SEARCH ROUTE
-// ============================================
-
+// --- SEARCH ROUTE ---
 app.get('/api/search', (req, res) => {
   const { q } = req.query;
   if (!q) {
@@ -682,10 +789,7 @@ app.get('/api/search', (req, res) => {
   res.json(results);
 });
 
-// ============================================
-// ADMIN STATS
-// ============================================
-
+// --- ADMIN STATS ---
 app.get('/api/admin/stats', (req, res) => {
   const totalPosts = mockPosts.length;
   const totalViews = mockPosts.reduce((sum, post) => sum + (post.views || 0), 0);
@@ -723,26 +827,19 @@ app.get('/api/admin/stats', (req, res) => {
   });
 });
 
-// ============================================
-// TEST ROUTE
-// ============================================
-
+// --- TEST ROUTE ---
 app.get('/api/test', (req, res) => {
-  const dbStatus = mongoose.connection.readyState;
-  const statusMap = {
-    0: 'disconnected',
-    1: 'connected',
-    2: 'connecting',
-    3: 'disconnecting'
-  };
-  
   res.json({
     message: 'News Sketch API Server',
     status: 'running',
     timestamp: new Date().toISOString(),
-    mongodb: statusMap[dbStatus] || 'unknown',
+    mongodb: isConnected ? 'connected' : 'disconnected',
     postsCount: mockPosts.length,
     videosCount: mockVideos.length,
+    cors: {
+      origins: allowedOrigins.filter(Boolean),
+      credentials: true,
+    },
     routes: {
       posts: '/api/posts',
       postBySlug: '/api/posts/:slug',
@@ -755,6 +852,7 @@ app.get('/api/test', (req, res) => {
       adminStats: '/api/admin/stats',
       auth: '/api/auth/login',
       test: '/api/test',
+      health: '/health'
     }
   });
 });
@@ -762,14 +860,6 @@ app.get('/api/test', (req, res) => {
 // ============================================
 // 404 HANDLER
 // ============================================
-// Add this route before the 404 handler
-app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  });
-});
 
 app.use((req, res) => {
   console.log(`❌ 404: ${req.method} ${req.originalUrl}`);
@@ -821,13 +911,14 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`\n🚀 Server running on http://localhost:${PORT}`);
   console.log(`📡 Test API: http://localhost:${PORT}/api/test`);
+  console.log(`💚 Health Check: http://localhost:${PORT}/health`);
   console.log(`📊 Admin Stats: http://localhost:${PORT}/api/admin/stats`);
   console.log(`\n📋 Available endpoints:`);
-  console.log(`   ─── AUTH ───`);
+  console.log(`   GET  /`);
+  console.log(`   GET  /health`);
+  console.log(`   GET  /api/test`);
   console.log(`   POST /api/auth/login`);
   console.log(`   GET  /api/auth/me`);
-  console.log(`   POST /api/auth/logout`);
-  console.log(`   ─── POSTS ───`);
   console.log(`   GET  /api/posts`);
   console.log(`   GET  /api/posts/:slug`);
   console.log(`   GET  /api/posts/id/:id`);
@@ -835,24 +926,17 @@ app.listen(PORT, () => {
   console.log(`   POST /api/posts`);
   console.log(`   PUT  /api/posts/id/:id`);
   console.log(`   DELETE /api/posts/id/:id`);
-  console.log(`   ─── CATEGORIES ───`);
   console.log(`   GET  /api/categories`);
   console.log(`   GET  /api/categories/:slug/posts`);
-  console.log(`   POST /api/categories`);
-  console.log(`   PUT  /api/categories/:id`);
-  console.log(`   DELETE /api/categories/:id`);
-  console.log(`   ─── COMMENTS ───`);
   console.log(`   GET  /api/comments`);
   console.log(`   POST /api/comments`);
-  console.log(`   ─── VIDEOS ───`);
   console.log(`   GET  /api/videos`);
   console.log(`   GET  /api/videos/:id`);
   console.log(`   POST /api/videos/upload`);
   console.log(`   POST /api/videos/youtube`);
   console.log(`   DELETE /api/videos/:id`);
-  console.log(`   ─── OTHER ───`);
   console.log(`   GET  /api/search`);
   console.log(`   GET  /api/admin/stats`);
-  console.log(`   GET  /api/test`);
-  console.log(`\n💡 Try: http://localhost:${PORT}/api/posts\n`);
+  console.log(`\n✅ CORS configured for:`, allowedOrigins.filter(Boolean));
+  console.log(`\n💡 Try: http://localhost:${PORT}/api/test\n`);
 });
