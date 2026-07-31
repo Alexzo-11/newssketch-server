@@ -7,6 +7,7 @@ const path = require('path');
 const mongoose = require('mongoose');
 const multer = require('multer');
 const fs = require('fs');
+const bcrypt = require('bcryptjs');
 
 // Load models
 const Post = require('./models/Post');
@@ -192,13 +193,11 @@ app.post('/api/auth/register', async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
     
-    // Check if user exists
     const userExists = await User.findOne({ email });
     if (userExists) {
       return res.status(400).json({ message: 'User already exists' });
     }
     
-    // Create user
     const user = await User.create({
       name,
       email,
@@ -227,16 +226,14 @@ app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
     console.log('📡 Login attempt:', email);
     
-    // Check for user
     const user = await User.findOne({ email }).select('+password');
     if (!user) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      return res.status(401).json({ message: 'Invalid email or password' });
     }
     
-    // Check password
     const isMatch = await user.matchPassword(password);
     if (!isMatch) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      return res.status(401).json({ message: 'Invalid email or password' });
     }
     
     res.json({
@@ -250,38 +247,31 @@ app.post('/api/auth/login', async (req, res) => {
     });
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ 
+      message: 'Server error during login',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
 // Get current user
 app.get('/api/auth/me', async (req, res) => {
   try {
-    // For development, return a default user
-    // In production, you'd get the user from the token
-    const user = await User.findOne({ email: 'admin@newssketch.com' });
-    if (user) {
-      res.json({
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      });
-    } else {
-      // Create default admin if not exists
-      const newUser = await User.create({
+    let user = await User.findOne({ email: 'admin@newssketch.com' });
+    if (!user) {
+      user = await User.create({
         name: 'Admin',
         email: 'admin@newssketch.com',
         password: 'admin123',
         role: 'admin',
       });
-      res.json({
-        id: newUser._id,
-        name: newUser.name,
-        email: newUser.email,
-        role: newUser.role,
-      });
     }
+    res.json({
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+    });
   } catch (error) {
     console.error('Get user error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -301,30 +291,17 @@ app.get('/api/posts', async (req, res) => {
   try {
     const { page = 1, limit = 10, category, featured, sort = '-createdAt' } = req.query;
     
-    // Build query
-    const query = {};
+    const query = { published: true };
     if (category) {
       const categoryDoc = await Category.findOne({ slug: category });
-      if (categoryDoc) {
-        query.category = categoryDoc._id;
-      }
+      if (categoryDoc) query.category = categoryDoc._id;
     }
-    if (featured === 'true') {
-      query.featured = true;
-    }
-    query.published = true;
+    if (featured === 'true') query.featured = true;
     
-    // Sort
     let sortOption = {};
-    if (sort === '-views') {
-      sortOption = { views: -1 };
-    } else if (sort === 'views') {
-      sortOption = { views: 1 };
-    } else if (sort === '-createdAt') {
-      sortOption = { createdAt: -1 };
-    } else {
-      sortOption = { createdAt: -1 };
-    }
+    if (sort === '-views') sortOption = { views: -1 };
+    else if (sort === 'views') sortOption = { views: 1 };
+    else sortOption = { createdAt: -1 };
     
     const posts = await Post.find(query)
       .populate('category', 'name slug')
@@ -351,13 +328,11 @@ app.get('/api/posts', async (req, res) => {
 app.get('/api/posts/related', async (req, res) => {
   try {
     const { category, exclude } = req.query;
-    
     if (!category) {
       return res.status(400).json({ message: 'Category parameter is required' });
     }
-    
     const posts = await Post.find({
-      category: category,
+      category,
       _id: { $ne: exclude },
       published: true,
     })
@@ -365,7 +340,6 @@ app.get('/api/posts/related', async (req, res) => {
       .populate('author', 'name')
       .limit(3)
       .sort({ createdAt: -1 });
-    
     res.json(posts);
   } catch (error) {
     console.error('Error fetching related posts:', error);
@@ -379,15 +353,11 @@ app.get('/api/posts/:slug', async (req, res) => {
     const post = await Post.findOne({ slug: req.params.slug, published: true })
       .populate('category', 'name slug')
       .populate('author', 'name');
-    
     if (!post) {
       return res.status(404).json({ message: 'Post not found' });
     }
-    
-    // Increment views
     post.views += 1;
     await post.save();
-    
     res.json(post);
   } catch (error) {
     console.error('Error fetching post:', error);
@@ -401,11 +371,9 @@ app.get('/api/posts/id/:id', async (req, res) => {
     const post = await Post.findById(req.params.id)
       .populate('category', 'name slug')
       .populate('author', 'name');
-    
     if (!post) {
       return res.status(404).json({ message: 'Post not found' });
     }
-    
     res.json(post);
   } catch (error) {
     console.error('Error fetching post by ID:', error);
@@ -422,18 +390,10 @@ app.post('/api/posts', uploadImage.single('image'), async (req, res) => {
     
     const { title, content, category, tags, metaTitle, metaDescription, slug: customSlug } = req.body;
     
-    // Validate required fields
-    if (!title) {
-      return res.status(400).json({ message: 'Title is required' });
-    }
-    if (!content) {
-      return res.status(400).json({ message: 'Content is required' });
-    }
-    if (!category) {
-      return res.status(400).json({ message: 'Category is required' });
-    }
+    if (!title) return res.status(400).json({ message: 'Title is required' });
+    if (!content) return res.status(400).json({ message: 'Content is required' });
+    if (!category) return res.status(400).json({ message: 'Category is required' });
     
-    // Parse tags
     let parsedTags = tags;
     if (typeof tags === 'string') {
       try {
@@ -443,17 +403,13 @@ app.post('/api/posts', uploadImage.single('image'), async (req, res) => {
       }
     }
     
-    // Generate slug
     let slug = customSlug || title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
     slug = slug.replace(/^-+|-+$/g, '');
-    
-    // Check if slug exists
     const existingPost = await Post.findOne({ slug });
     if (existingPost) {
       slug = slug + '-' + Date.now();
     }
     
-    // Handle image
     let imageUrl = '/placeholder.svg';
     let publicId = 'placeholder';
     if (req.file) {
@@ -461,7 +417,12 @@ app.post('/api/posts', uploadImage.single('image'), async (req, res) => {
       publicId = req.file.filename;
     }
     
-    // Create post
+    // Get the admin user (or from authenticated user)
+    const adminUser = await User.findOne({ email: 'admin@newssketch.com' });
+    if (!adminUser) {
+      return res.status(400).json({ message: 'Admin user not found. Please seed the database.' });
+    }
+    
     const post = await Post.create({
       title,
       slug,
@@ -470,7 +431,7 @@ app.post('/api/posts', uploadImage.single('image'), async (req, res) => {
       image: { url: imageUrl, publicId },
       category,
       tags: parsedTags || [],
-      author: '67d8e3f5a1b2c3d4e5f6a7b8', // Replace with actual user ID
+      author: adminUser._id,
       metaTitle: metaTitle || title,
       metaDescription: metaDescription || content.replace(/<[^>]*>/g, '').slice(0, 160),
       readingTime: Math.ceil(content.replace(/<[^>]*>/g, '').split(' ').length / 200) || 2,
@@ -483,7 +444,7 @@ app.post('/api/posts', uploadImage.single('image'), async (req, res) => {
     console.error('❌ Error creating post:', error);
     res.status(500).json({ 
       message: 'Failed to create post',
-      error: error.message 
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
@@ -492,8 +453,6 @@ app.post('/api/posts', uploadImage.single('image'), async (req, res) => {
 app.put('/api/posts/id/:id', uploadImage.single('image'), async (req, res) => {
   try {
     const { id } = req.params;
-    console.log('📡 PUT /api/posts/id/:id:', id);
-    
     const post = await Post.findById(id);
     if (!post) {
       return res.status(404).json({ message: 'Post not found' });
@@ -501,7 +460,6 @@ app.put('/api/posts/id/:id', uploadImage.single('image'), async (req, res) => {
     
     const { title, content, category, tags, metaTitle, metaDescription, slug: customSlug } = req.body;
     
-    // Handle image
     let imageUrl = post.image?.url || '/placeholder.svg';
     let publicId = post.image?.publicId || 'placeholder';
     if (req.file) {
@@ -509,21 +467,16 @@ app.put('/api/posts/id/:id', uploadImage.single('image'), async (req, res) => {
       publicId = req.file.filename;
     }
     
-    // Update post
     post.title = title || post.title;
     post.content = content || post.content;
     post.category = category || post.category;
     post.tags = tags ? (typeof tags === 'string' ? tags.split(',').map(t => t.trim()) : tags) : post.tags;
     post.metaTitle = metaTitle || post.metaTitle;
     post.metaDescription = metaDescription || post.metaDescription;
-    if (customSlug) {
-      post.slug = customSlug;
-    }
+    if (customSlug) post.slug = customSlug;
     post.image = { url: imageUrl, publicId };
     
     await post.save();
-    
-    console.log('✅ Post updated:', id);
     res.json(post);
   } catch (error) {
     console.error('Error updating post:', error);
@@ -535,15 +488,11 @@ app.put('/api/posts/id/:id', uploadImage.single('image'), async (req, res) => {
 app.delete('/api/posts/id/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    console.log('📡 DELETE /api/posts/id/:id:', id);
-    
     const post = await Post.findById(id);
     if (!post) {
       return res.status(404).json({ message: 'Post not found' });
     }
-    
     await post.deleteOne();
-    console.log('✅ Post deleted:', id);
     res.json({ message: 'Post deleted successfully' });
   } catch (error) {
     console.error('Error deleting post:', error);
@@ -555,7 +504,6 @@ app.delete('/api/posts/id/:id', async (req, res) => {
 // CATEGORY ROUTES - WITH REAL DATABASE
 // ============================================
 
-// GET all categories
 app.get('/api/categories', async (req, res) => {
   try {
     const categories = await Category.find().sort({ name: 1 });
@@ -566,21 +514,15 @@ app.get('/api/categories', async (req, res) => {
   }
 });
 
-// GET posts by category slug
 app.get('/api/categories/:slug/posts', async (req, res) => {
   try {
     const category = await Category.findOne({ slug: req.params.slug });
     if (!category) {
       return res.status(404).json({ message: 'Category not found' });
     }
-    
-    const posts = await Post.find({ 
-      category: category._id, 
-      published: true 
-    })
+    const posts = await Post.find({ category: category._id, published: true })
       .populate('author', 'name')
       .sort({ createdAt: -1 });
-    
     res.json({ category, posts });
   } catch (error) {
     console.error('Error fetching category posts:', error);
@@ -588,20 +530,16 @@ app.get('/api/categories/:slug/posts', async (req, res) => {
   }
 });
 
-// POST create category
 app.post('/api/categories', async (req, res) => {
   try {
     const { name, description } = req.body;
-    
     if (!name) {
       return res.status(400).json({ message: 'Name is required' });
     }
-    
     const category = await Category.create({
       name,
       description: description || '',
     });
-    
     res.status(201).json(category);
   } catch (error) {
     console.error('Error creating category:', error);
@@ -609,20 +547,16 @@ app.post('/api/categories', async (req, res) => {
   }
 });
 
-// PUT update category
 app.put('/api/categories/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { name, description } = req.body;
-    
     const category = await Category.findById(id);
     if (!category) {
       return res.status(404).json({ message: 'Category not found' });
     }
-    
     category.name = name || category.name;
     category.description = description !== undefined ? description : category.description;
-    
     await category.save();
     res.json(category);
   } catch (error) {
@@ -631,7 +565,6 @@ app.put('/api/categories/:id', async (req, res) => {
   }
 });
 
-// DELETE category
 app.delete('/api/categories/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -639,7 +572,6 @@ app.delete('/api/categories/:id', async (req, res) => {
     if (!category) {
       return res.status(404).json({ message: 'Category not found' });
     }
-    
     await category.deleteOne();
     res.json({ message: 'Category deleted successfully' });
   } catch (error) {
@@ -652,16 +584,13 @@ app.delete('/api/categories/:id', async (req, res) => {
 // COMMENT ROUTES - WITH REAL DATABASE
 // ============================================
 
-// GET comments for a post
 app.get('/api/comments', async (req, res) => {
   try {
     const { post } = req.query;
     const query = post ? { post } : {};
-    
     const comments = await Comment.find(query)
       .populate('author', 'name')
       .sort({ createdAt: -1 });
-    
     res.json(comments);
   } catch (error) {
     console.error('Error fetching comments:', error);
@@ -669,16 +598,12 @@ app.get('/api/comments', async (req, res) => {
   }
 });
 
-// POST create comment
 app.post('/api/comments', async (req, res) => {
   try {
     const { content, postId } = req.body;
-    
     if (!content || !postId) {
       return res.status(400).json({ message: 'Content and postId are required' });
     }
-    
-    // Get author from request (for now, use a default user)
     let author = await User.findOne({ email: 'admin@newssketch.com' });
     if (!author) {
       author = await User.create({
@@ -688,16 +613,13 @@ app.post('/api/comments', async (req, res) => {
         role: 'admin',
       });
     }
-    
     const comment = await Comment.create({
       content,
       author: author._id,
       post: postId,
     });
-    
     const populatedComment = await Comment.findById(comment._id)
       .populate('author', 'name');
-    
     res.status(201).json(populatedComment);
   } catch (error) {
     console.error('Error creating comment:', error);
@@ -715,7 +637,6 @@ app.get('/api/search', async (req, res) => {
     if (!q) {
       return res.status(400).json({ message: 'Query parameter q is required' });
     }
-    
     const posts = await Post.find({
       $text: { $search: q },
       published: true,
@@ -724,7 +645,6 @@ app.get('/api/search', async (req, res) => {
       .populate('author', 'name')
       .sort({ score: { $meta: 'textScore' } })
       .limit(20);
-    
     res.json(posts);
   } catch (error) {
     console.error('Error searching:', error);
@@ -744,26 +664,21 @@ app.get('/api/admin/stats', async (req, res) => {
     const totalViews = await Post.aggregate([
       { $group: { _id: null, total: { $sum: '$views' } } }
     ]);
-    
-    // Most read posts
     const mostRead = await Post.find({ published: true })
       .sort({ views: -1 })
       .limit(5)
       .select('title slug views');
-    
-    // Category counts
     const categoryCounts = await Post.aggregate([
       { $group: { _id: '$category', count: { $sum: 1 } } },
       { $lookup: { from: 'categories', localField: '_id', foreignField: '_id', as: 'category' } },
       { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } },
       { $project: { name: '$category.name', count: 1 } }
     ]);
-    
     res.json({
       posts: totalPosts,
       views: totalViews[0]?.total || 0,
       comments: totalComments,
-      visitors: 1234, // Mock for now
+      visitors: 1234,
       mostRead,
       categories: categoryCounts,
       chartData: {
@@ -788,11 +703,9 @@ app.get('/api/test', async (req, res) => {
     2: 'connecting',
     3: 'disconnecting'
   };
-  
   const postCount = await Post.countDocuments();
   const categoryCount = await Category.countDocuments();
   const userCount = await User.countDocuments();
-  
   res.json({
     message: 'News Sketch API Server',
     status: 'running',
@@ -842,16 +755,12 @@ app.use((req, res) => {
 app.use((err, req, res, next) => {
   console.error('❌ Error:', err.message);
   console.error('Stack:', err.stack);
-  
   if (err instanceof multer.MulterError) {
     if (err.code === 'FILE_TOO_LARGE') {
-      return res.status(400).json({ 
-        message: 'Image file too large. Max size is 10MB.' 
-      });
+      return res.status(400).json({ message: 'Image file too large. Max size is 10MB.' });
     }
     return res.status(400).json({ message: err.message });
   }
-  
   res.status(500).json({
     message: 'Something went wrong!',
     error: process.env.NODE_ENV === 'development' ? err.message : undefined,
