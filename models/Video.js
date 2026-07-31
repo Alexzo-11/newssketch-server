@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const VideoSchema = new mongoose.Schema({
   title: {
     type: String,
-    required: true,
+    required: [true, 'Please add a title'],
     trim: true,
   },
   description: {
@@ -35,9 +35,6 @@ const VideoSchema = new mongoose.Schema({
   thumbnail: {
     type: String,
   },
-  duration: {
-    type: String,
-  },
   views: {
     type: Number,
     default: 0,
@@ -51,14 +48,8 @@ const VideoSchema = new mongoose.Schema({
     enum: ['active', 'inactive'],
     default: 'active',
   },
-  createdAt: {
-    type: Date,
-    default: Date.now,
-  },
-  updatedAt: {
-    type: Date,
-    default: Date.now,
-  },
+}, {
+  timestamps: true,
 });
 
 module.exports = mongoose.model('Video', VideoSchema);

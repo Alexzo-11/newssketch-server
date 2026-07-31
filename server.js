@@ -14,6 +14,7 @@ const Post = require('./models/Post');
 const Category = require('./models/Category');
 const User = require('./models/User');
 const Comment = require('./models/Comment');
+const Video = require('./models/Video');
 
 dotenv.config({ path: path.join(__dirname, '.env') });
 
@@ -109,6 +110,13 @@ app.get('/', (req, res) => {
         list: 'GET /api/comments',
         create: 'POST /api/comments'
       },
+      videos: {
+        list: 'GET /api/videos',
+        get: 'GET /api/videos/:id',
+        upload: 'POST /api/videos/upload',
+        youtube: 'POST /api/videos/youtube',
+        delete: 'DELETE /api/videos/:id'
+      },
       search: 'GET /api/search',
       admin: {
         stats: 'GET /api/admin/stats'
@@ -146,6 +154,7 @@ if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
+// Image upload configuration
 const imageStorage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, uploadDir);
@@ -174,6 +183,35 @@ const uploadImage = multer({
   fileFilter: imageFilter
 });
 
+// Video upload configuration
+const videoStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'video-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const videoFilter = (req, file, cb) => {
+  const allowedTypes = /mp4|webm|ogg|mov|avi|mkv/;
+  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+  const mimetype = allowedTypes.test(file.mimetype);
+  
+  if (mimetype && extname) {
+    return cb(null, true);
+  } else {
+    cb(new Error('Only video files are allowed (MP4, WebM, OGG, MOV, AVI, MKV)'));
+  }
+};
+
+const uploadVideo = multer({
+  storage: videoStorage,
+  limits: { fileSize: 500 * 1024 * 1024 },
+  fileFilter: videoFilter
+});
+
 // ============================================
 // MIDDLEWARE
 // ============================================
@@ -185,7 +223,7 @@ app.use(morgan('dev'));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ============================================
-// AUTH ROUTES - WITH REAL DATABASE
+// AUTH ROUTES
 // ============================================
 
 // Register
@@ -283,7 +321,7 @@ app.post('/api/auth/logout', (req, res) => {
 });
 
 // ============================================
-// POST ROUTES - WITH REAL DATABASE
+// POST ROUTES
 // ============================================
 
 // GET all posts
@@ -417,7 +455,6 @@ app.post('/api/posts', uploadImage.single('image'), async (req, res) => {
       publicId = req.file.filename;
     }
     
-    // Get the admin user (or from authenticated user)
     const adminUser = await User.findOne({ email: 'admin@newssketch.com' });
     if (!adminUser) {
       return res.status(400).json({ message: 'Admin user not found. Please seed the database.' });
@@ -501,7 +538,7 @@ app.delete('/api/posts/id/:id', async (req, res) => {
 });
 
 // ============================================
-// CATEGORY ROUTES - WITH REAL DATABASE
+// CATEGORY ROUTES
 // ============================================
 
 app.get('/api/categories', async (req, res) => {
@@ -543,7 +580,10 @@ app.post('/api/categories', async (req, res) => {
     res.status(201).json(category);
   } catch (error) {
     console.error('Error creating category:', error);
-    res.status(500).json({ message: 'Failed to create category' });
+    res.status(500).json({ 
+      message: 'Failed to create category',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
@@ -581,7 +621,7 @@ app.delete('/api/categories/:id', async (req, res) => {
 });
 
 // ============================================
-// COMMENT ROUTES - WITH REAL DATABASE
+// COMMENT ROUTES
 // ============================================
 
 app.get('/api/comments', async (req, res) => {
@@ -628,6 +668,170 @@ app.post('/api/comments', async (req, res) => {
 });
 
 // ============================================
+// VIDEO ROUTES
+// ============================================
+
+// GET all videos
+app.get('/api/videos', async (req, res) => {
+  try {
+    const { page = 1, limit = 10, type } = req.query;
+    const query = {};
+    if (type) query.type = type;
+    
+    const videos = await Video.find(query)
+      .populate('uploadedBy', 'name')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit));
+    
+    const total = await Video.countDocuments(query);
+    
+    res.json({
+      videos,
+      total,
+      totalPages: Math.ceil(total / parseInt(limit)),
+      currentPage: parseInt(page),
+    });
+  } catch (error) {
+    console.error('Error fetching videos:', error);
+    res.status(500).json({ message: 'Failed to fetch videos' });
+  }
+});
+
+// GET single video
+app.get('/api/videos/:id', async (req, res) => {
+  try {
+    const video = await Video.findById(req.params.id)
+      .populate('uploadedBy', 'name');
+    if (!video) {
+      return res.status(404).json({ message: 'Video not found' });
+    }
+    video.views += 1;
+    await video.save();
+    res.json(video);
+  } catch (error) {
+    console.error('Error fetching video:', error);
+    res.status(500).json({ message: 'Failed to fetch video' });
+  }
+});
+
+// Upload video
+app.post('/api/videos/upload', uploadVideo.single('video'), async (req, res) => {
+  try {
+    console.log('📡 POST /api/videos/upload');
+    console.log('📦 Request body:', req.body);
+    
+    const { title, description } = req.body;
+    
+    if (!title) {
+      return res.status(400).json({ message: 'Title is required' });
+    }
+    
+    const adminUser = await User.findOne({ email: 'admin@newssketch.com' });
+    if (!adminUser) {
+      return res.status(400).json({ message: 'Admin user not found' });
+    }
+    
+    let fileUrl = null;
+    let fileSize = 0;
+    let mimeType = null;
+    if (req.file) {
+      fileUrl = `/uploads/${req.file.filename}`;
+      fileSize = req.file.size;
+      mimeType = req.file.mimetype;
+    }
+    
+    const video = await Video.create({
+      title,
+      description: description || '',
+      type: 'upload',
+      fileUrl,
+      fileSize,
+      mimeType,
+      uploadedBy: adminUser._id,
+    });
+    
+    console.log('✅ Video created:', video._id);
+    res.status(201).json(video);
+  } catch (error) {
+    console.error('Error uploading video:', error);
+    res.status(500).json({ 
+      message: 'Failed to upload video',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Add YouTube video
+app.post('/api/videos/youtube', async (req, res) => {
+  try {
+    console.log('📡 POST /api/videos/youtube');
+    console.log('📦 Request body:', req.body);
+    
+    const { title, description, youtubeUrl } = req.body;
+    
+    if (!title) {
+      return res.status(400).json({ message: 'Title is required' });
+    }
+    if (!youtubeUrl) {
+      return res.status(400).json({ message: 'YouTube URL is required' });
+    }
+    
+    // Extract YouTube video ID
+    const youtubeRegex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
+    const match = youtubeUrl.match(youtubeRegex);
+    
+    if (!match) {
+      return res.status(400).json({ 
+        message: 'Invalid YouTube URL. Please use format: https://www.youtube.com/watch?v=VIDEO_ID' 
+      });
+    }
+    
+    const youtubeId = match[1];
+    
+    const adminUser = await User.findOne({ email: 'admin@newssketch.com' });
+    if (!adminUser) {
+      return res.status(400).json({ message: 'Admin user not found' });
+    }
+    
+    const video = await Video.create({
+      title,
+      description: description || '',
+      type: 'youtube',
+      youtubeId,
+      youtubeUrl: `https://www.youtube.com/watch?v=${youtubeId}`,
+      thumbnail: `https://img.youtube.com/vi/${youtubeId}/maxresdefault.jpg`,
+      uploadedBy: adminUser._id,
+    });
+    
+    console.log('✅ YouTube video added:', video._id);
+    res.status(201).json(video);
+  } catch (error) {
+    console.error('Error adding YouTube video:', error);
+    res.status(500).json({ 
+      message: 'Failed to add YouTube video',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// DELETE video
+app.delete('/api/videos/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const video = await Video.findById(id);
+    if (!video) {
+      return res.status(404).json({ message: 'Video not found' });
+    }
+    await video.deleteOne();
+    res.json({ message: 'Video deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting video:', error);
+    res.status(500).json({ message: 'Failed to delete video' });
+  }
+});
+
+// ============================================
 // SEARCH ROUTE
 // ============================================
 
@@ -661,6 +865,7 @@ app.get('/api/admin/stats', async (req, res) => {
     const totalPosts = await Post.countDocuments();
     const totalComments = await Comment.countDocuments();
     const totalCategories = await Category.countDocuments();
+    const totalVideos = await Video.countDocuments();
     const totalViews = await Post.aggregate([
       { $group: { _id: null, total: { $sum: '$views' } } }
     ]);
@@ -678,6 +883,7 @@ app.get('/api/admin/stats', async (req, res) => {
       posts: totalPosts,
       views: totalViews[0]?.total || 0,
       comments: totalComments,
+      videos: totalVideos,
       visitors: 1234,
       mostRead,
       categories: categoryCounts,
@@ -706,6 +912,8 @@ app.get('/api/test', async (req, res) => {
   const postCount = await Post.countDocuments();
   const categoryCount = await Category.countDocuments();
   const userCount = await User.countDocuments();
+  const videoCount = await Video.countDocuments();
+  
   res.json({
     message: 'News Sketch API Server',
     status: 'running',
@@ -715,6 +923,7 @@ app.get('/api/test', async (req, res) => {
       posts: postCount,
       categories: categoryCount,
       users: userCount,
+      videos: videoCount,
     },
     cors: {
       origins: allowedOrigins.filter(Boolean),
@@ -727,6 +936,7 @@ app.get('/api/test', async (req, res) => {
       related: '/api/posts/related?category=:id&exclude=:id',
       categories: '/api/categories',
       comments: '/api/comments',
+      videos: '/api/videos',
       search: '/api/search',
       adminStats: '/api/admin/stats',
       auth: '/api/auth/login',
@@ -757,7 +967,7 @@ app.use((err, req, res, next) => {
   console.error('Stack:', err.stack);
   if (err instanceof multer.MulterError) {
     if (err.code === 'FILE_TOO_LARGE') {
-      return res.status(400).json({ message: 'Image file too large. Max size is 10MB.' });
+      return res.status(400).json({ message: 'File too large. Max size is 10MB.' });
     }
     return res.status(400).json({ message: err.message });
   }
@@ -795,6 +1005,11 @@ app.listen(PORT, () => {
   console.log(`   GET  /api/categories/:slug/posts`);
   console.log(`   GET  /api/comments`);
   console.log(`   POST /api/comments`);
+  console.log(`   GET  /api/videos`);
+  console.log(`   GET  /api/videos/:id`);
+  console.log(`   POST /api/videos/upload`);
+  console.log(`   POST /api/videos/youtube`);
+  console.log(`   DELETE /api/videos/:id`);
   console.log(`   GET  /api/search`);
   console.log(`   GET  /api/admin/stats`);
   console.log(`\n✅ CORS configured for:`, allowedOrigins.filter(Boolean));
