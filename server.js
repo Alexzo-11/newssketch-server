@@ -567,16 +567,26 @@ app.get('/api/categories/:slug/posts', async (req, res) => {
   }
 });
 
+// POST create category
 app.post('/api/categories', async (req, res) => {
   try {
     const { name, description } = req.body;
+    
     if (!name) {
       return res.status(400).json({ message: 'Name is required' });
     }
+    
+    // Check if category already exists
+    const existingCategory = await Category.findOne({ name: name.trim() });
+    if (existingCategory) {
+      return res.status(400).json({ message: 'Category already exists' });
+    }
+    
     const category = await Category.create({
-      name,
-      description: description || '',
+      name: name.trim(),
+      description: description ? description.trim() : '',
     });
+    
     res.status(201).json(category);
   } catch (error) {
     console.error('Error creating category:', error);
