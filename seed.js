@@ -1,15 +1,22 @@
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
+const path = require('path');
 const User = require('./models/User');
 
-dotenv.config({ path: './.env' });
+// Load .env from server root
+dotenv.config({ path: path.join(__dirname, '.env') });
 
 const seedAdmin = async () => {
   try {
+    console.log('📡 Connecting to MongoDB...');
+    // Remove deprecated options
     await mongoose.connect(process.env.MONGODB_URI);
+    
+    console.log('✅ Connected to MongoDB');
     
     const adminExists = await User.findOne({ email: 'admin@newssketch.com' });
     if (!adminExists) {
+      console.log('🔧 Creating admin user...');
       await User.create({
         name: 'Admin',
         email: 'admin@newssketch.com',
@@ -21,9 +28,9 @@ const seedAdmin = async () => {
       console.log('ℹ️ Admin user already exists');
     }
     
-    process.exit();
+    process.exit(0);
   } catch (error) {
-    console.error('❌ Error seeding admin:', error);
+    console.error('❌ Error seeding admin:', error.message);
     process.exit(1);
   }
 };
