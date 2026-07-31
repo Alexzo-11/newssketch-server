@@ -424,13 +424,21 @@ app.post('/api/posts', uploadImage.single('image'), async (req, res) => {
   try {
     console.log('📡 POST /api/posts - Creating new post');
     console.log('📦 Request body:', req.body);
-    console.log('📎 Uploaded file:', req.file);
+    
+    // Set a timeout for the entire operation
+    req.setTimeout(120000);
     
     const { title, content, category, tags, metaTitle, metaDescription, slug: customSlug } = req.body;
     
-    if (!title) return res.status(400).json({ message: 'Title is required' });
-    if (!content) return res.status(400).json({ message: 'Content is required' });
-    if (!category) return res.status(400).json({ message: 'Category is required' });
+    if (!title) {
+      return res.status(400).json({ message: 'Title is required' });
+    }
+    if (!content) {
+      return res.status(400).json({ message: 'Content is required' });
+    }
+    if (!category) {
+      return res.status(400).json({ message: 'Category is required' });
+    }
     
     let parsedTags = tags;
     if (typeof tags === 'string') {
@@ -453,6 +461,7 @@ app.post('/api/posts', uploadImage.single('image'), async (req, res) => {
     if (req.file) {
       imageUrl = `/uploads/${req.file.filename}`;
       publicId = req.file.filename;
+      console.log('📎 Image uploaded:', req.file.filename);
     }
     
     const adminUser = await User.findOne({ email: 'admin@newssketch.com' });
@@ -567,7 +576,6 @@ app.get('/api/categories/:slug/posts', async (req, res) => {
   }
 });
 
-// POST create category
 app.post('/api/categories', async (req, res) => {
   try {
     const { name, description } = req.body;
@@ -985,12 +993,27 @@ app.use((req, res) => {
 app.use((err, req, res, next) => {
   console.error('❌ Error:', err.message);
   console.error('Stack:', err.stack);
+  
   if (err instanceof multer.MulterError) {
     if (err.code === 'FILE_TOO_LARGE') {
-      return res.status(400).json({ message: 'File too large. Max size is 10MB.' });
+      return res.status(400).json({ 
+        message: err.fieldname === 'video' 
+          ? 'Video file too large. Max size is 500MB.' 
+          : 'Image file too large. Max size is 10MB.' 
+      });
+    }
+    if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+      return res.status(400).json({ 
+        message: `Unexpected field: ${err.field}. Please use the correct field name.` 
+      });
     }
     return res.status(400).json({ message: err.message });
   }
+  
+  if (err.message && err.message.includes('Only')) {
+    return res.status(400).json({ message: err.message });
+  }
+  
   res.status(500).json({
     message: 'Something went wrong!',
     error: process.env.NODE_ENV === 'development' ? err.message : undefined,
