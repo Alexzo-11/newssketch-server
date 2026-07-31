@@ -11,6 +11,7 @@ const PostSchema = new mongoose.Schema({
     type: String,
     required: true,
     unique: true,
+    trim: true,
   },
   content: {
     type: String,
@@ -27,14 +28,14 @@ const PostSchema = new mongoose.Schema({
   category: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Category',
-    required: true,
+    required: [true, 'Please select a category'],
   },
+  tags: [String],
   author: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true,
   },
-  tags: [String],
   views: {
     type: Number,
     default: 0,
@@ -57,7 +58,15 @@ const PostSchema = new mongoose.Schema({
   timestamps: true,
 });
 
-// Create index for search
-PostSchema.index({ title: 'text', content: 'text', excerpt: 'text' });
+// Create slug from title before saving
+PostSchema.pre('save', function(next) {
+  if (this.isModified('title') && !this.slug) {
+    this.slug = this.title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+  next();
+});
 
 module.exports = mongoose.model('Post', PostSchema);

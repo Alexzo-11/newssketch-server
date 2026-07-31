@@ -11,11 +11,10 @@ const UserSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Please add an email'],
     unique: true,
-    lowercase: true,
     match: [
       /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/,
-      'Please add a valid email'
-    ]
+      'Please add a valid email',
+    ],
   },
   password: {
     type: String,
@@ -25,11 +24,9 @@ const UserSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['admin', 'editor', 'user'],
-    default: 'user',
+    enum: ['admin', 'editor'],
+    default: 'admin',
   },
-  resetPasswordToken: String,
-  resetPasswordExpire: Date,
 }, {
   timestamps: true,
 });

@@ -8,12 +8,22 @@ const mongoose = require('mongoose');
 const multer = require('multer');
 const fs = require('fs');
 
+// Load models
+const Post = require('./models/Post');
+const Category = require('./models/Category');
+const User = require('./models/User');
+const Comment = require('./models/Comment');
+
 dotenv.config({ path: path.join(__dirname, '.env') });
 
 const app = express();
 
+// Connect to MongoDB
+const connectDB = require('./config/db');
+connectDB();
+
 // ============================================
-// CORS CONFIGURATION - PRODUCTION READY
+// CORS CONFIGURATION
 // ============================================
 
 const allowedOrigins = [
@@ -25,7 +35,6 @@ const allowedOrigins = [
   'https://*.onrender.com',
 ];
 
-// Custom CORS middleware
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   
@@ -63,20 +72,21 @@ app.use((req, res, next) => {
 });
 
 // ============================================
-// HEALTH & ROOT ROUTES
+// ROOT & HEALTH ROUTES
 // ============================================
 
 app.get('/', (req, res) => {
   res.json({
     message: 'News Sketch API Server',
     status: 'running',
-    version: '1.0.0',
+    version: '2.0.0 - Database Mode',
     timestamp: new Date().toISOString(),
     endpoints: {
       auth: {
         login: 'POST /api/auth/login',
         me: 'GET /api/auth/me',
-        logout: 'POST /api/auth/logout'
+        logout: 'POST /api/auth/logout',
+        register: 'POST /api/auth/register'
       },
       posts: {
         list: 'GET /api/posts',
@@ -98,13 +108,6 @@ app.get('/', (req, res) => {
         list: 'GET /api/comments',
         create: 'POST /api/comments'
       },
-      videos: {
-        list: 'GET /api/videos',
-        get: 'GET /api/videos/:id',
-        upload: 'POST /api/videos/upload',
-        youtube: 'POST /api/videos/youtube',
-        delete: 'DELETE /api/videos/:id'
-      },
       search: 'GET /api/search',
       admin: {
         stats: 'GET /api/admin/stats'
@@ -116,46 +119,22 @@ app.get('/', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  let dbStatus = 'disconnected';
-  if (mongoose.connection) {
-    const statusMap = {
-      0: 'disconnected',
-      1: 'connected',
-      2: 'connecting',
-      3: 'disconnecting'
-    };
-    dbStatus = statusMap[mongoose.connection.readyState] || 'unknown';
-  }
+  const dbStatus = mongoose.connection.readyState;
+  const statusMap = {
+    0: 'disconnected',
+    1: 'connected',
+    2: 'connecting',
+    3: 'disconnecting'
+  };
   
   res.status(200).json({ 
     status: 'OK', 
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
-    mongodb: dbStatus,
+    mongodb: statusMap[dbStatus] || 'unknown',
     environment: process.env.NODE_ENV || 'development'
   });
 });
-
-// ============================================
-// CONNECT TO MONGODB
-// ============================================
-
-let isConnected = false;
-
-if (process.env.MONGODB_URI) {
-  mongoose.connect(process.env.MONGODB_URI)
-    .then((conn) => {
-      isConnected = true;
-      console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
-      console.log(`📦 Database: ${conn.connection.name}`);
-    })
-    .catch((error) => {
-      console.error(`❌ MongoDB Connection Error: ${error.message}`);
-      isConnected = false;
-    });
-} else {
-  console.log('⏭️  Skipping MongoDB connection (no URI provided)');
-}
 
 // ============================================
 // MULTER CONFIGURATION
@@ -194,34 +173,6 @@ const uploadImage = multer({
   fileFilter: imageFilter
 });
 
-const videoStorage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'video-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-const videoFilter = (req, file, cb) => {
-  const allowedTypes = /mp4|webm|ogg|mov|avi|mkv/;
-  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-  const mimetype = allowedTypes.test(file.mimetype);
-  
-  if (mimetype && extname) {
-    return cb(null, true);
-  } else {
-    cb(new Error('Only video files are allowed (MP4, WebM, OGG, MOV, AVI, MKV)'));
-  }
-};
-
-const uploadVideo = multer({
-  storage: videoStorage,
-  limits: { fileSize: 500 * 1024 * 1024 },
-  fileFilter: videoFilter
-});
-
 // ============================================
 // MIDDLEWARE
 // ============================================
@@ -233,159 +184,108 @@ app.use(morgan('dev'));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ============================================
-// MOCK DATA
+// AUTH ROUTES - WITH REAL DATABASE
 // ============================================
 
-const mockPosts = [
-  {
-    _id: '1',
-    title: 'Getting Started with News Sketch',
-    slug: 'getting-started-with-news-sketch',
-    excerpt: 'Learn how to build a modern news platform with Next.js and Node.js',
-    content: '<p>This is a sample article to help you get started with News Sketch.</p>',
-    image: { url: '/placeholder1.jpg' },
-    category: { _id: '1', name: 'Technology', slug: 'technology' },
-    author: { _id: '1', name: 'Admin' },
-    views: 151,
-    readingTime: 3,
-    tags: ['nextjs', 'react', 'nodejs'],
-    createdAt: new Date('2024-01-15T10:00:00Z'),
-    published: true,
-    featured: true,
-  },
-  {
-    _id: '2',
-    title: 'Building REST APIs with Express',
-    slug: 'building-rest-apis-with-express',
-    excerpt: 'A comprehensive guide to building RESTful APIs with Express.js and MongoDB',
-    content: '<p>Learn how to build robust APIs for your applications.</p>',
-    image: { url: '/placeholder2.jpg' },
-    category: { _id: '2', name: 'Development', slug: 'development' },
-    author: { _id: '1', name: 'Admin' },
-    views: 89,
-    readingTime: 5,
-    tags: ['express', 'api', 'mongodb'],
-    createdAt: new Date('2024-01-20T14:30:00Z'),
-    published: true,
-    featured: false,
-  },
-  {
-    _id: '3',
-    title: 'Tailwind CSS Tips and Tricks',
-    slug: 'tailwind-css-tips-and-tricks',
-    excerpt: 'Improve your workflow with these Tailwind CSS best practices',
-    content: '<p>Discover powerful Tailwind CSS techniques for faster development.</p>',
-    image: { url: '/placeholder3.jpg' },
-    category: { _id: '1', name: 'Technology', slug: 'technology' },
-    author: { _id: '1', name: 'Admin' },
-    views: 210,
-    readingTime: 4,
-    tags: ['tailwindcss', 'css', 'design'],
-    createdAt: new Date('2024-01-25T09:15:00Z'),
-    published: true,
-    featured: true,
-  },
-  {
-    _id: '4',
-    title: 'Next.js 15 Features',
-    slug: 'next-js-15-features',
-    excerpt: 'Explore the latest features in Next.js 15',
-    content: '<p>Next.js 15 brings many exciting features.</p>',
-    image: { url: '/placeholder4.jpg' },
-    category: { _id: '2', name: 'Development', slug: 'development' },
-    author: { _id: '1', name: 'Admin' },
-    views: 75,
-    readingTime: 4,
-    tags: ['nextjs', 'react'],
-    createdAt: new Date('2024-01-28T16:45:00Z'),
-    published: true,
-    featured: false,
-  },
-];
-
-const mockComments = [
-  {
-    _id: '1',
-    content: 'Great article! Very informative.',
-    author: { _id: '2', name: 'John Doe' },
-    post: '1',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    _id: '2',
-    content: 'Thanks for sharing this! Looking forward to more content.',
-    author: { _id: '3', name: 'Jane Smith' },
-    post: '1',
-    createdAt: new Date().toISOString(),
-  },
-];
-
-const mockCategories = [
-  { _id: '1', name: 'Technology', slug: 'technology', description: 'Latest tech news' },
-  { _id: '2', name: 'Development', slug: 'development', description: 'Software development' },
-  { _id: '3', name: 'Design', slug: 'design', description: 'UI/UX design' },
-  { _id: '4', name: 'Business', slug: 'business', description: 'Business and finance' },
-];
-
-const mockVideos = [
-  {
-    _id: '1',
-    title: 'Introduction to News Sketch',
-    description: 'Learn how to build a modern news platform with Next.js and Node.js',
-    type: 'youtube',
-    youtubeId: 'dQw4w9WgXcQ',
-    youtubeUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-    thumbnail: 'https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg',
-    views: 150,
-    uploadedBy: { _id: '1', name: 'Admin' },
-    createdAt: new Date().toISOString(),
-    status: 'active',
-  },
-  {
-    _id: '2',
-    title: 'Building REST APIs with Express',
-    description: 'A comprehensive guide to building RESTful APIs',
-    type: 'youtube',
-    youtubeId: '9zUHg7xjIqQ',
-    youtubeUrl: 'https://www.youtube.com/watch?v=9zUHg7xjIqQ',
-    thumbnail: 'https://img.youtube.com/vi/9zUHg7xjIqQ/maxresdefault.jpg',
-    views: 89,
-    uploadedBy: { _id: '1', name: 'Admin' },
-    createdAt: new Date().toISOString(),
-    status: 'active',
-  },
-];
-
-// ============================================
-// AUTH ROUTES
-// ============================================
-
-app.post('/api/auth/login', (req, res) => {
-  const { email, password } = req.body;
-  console.log('📡 Login attempt:', email);
-  
-  if (email === 'admin@newssketch.com' && password === 'admin123') {
-    res.json({
-      user: { 
-        id: '1', 
-        name: 'Admin', 
-        email: 'admin@newssketch.com', 
-        role: 'admin' 
+// Register
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { name, email, password, role } = req.body;
+    
+    // Check if user exists
+    const userExists = await User.findOne({ email });
+    if (userExists) {
+      return res.status(400).json({ message: 'User already exists' });
+    }
+    
+    // Create user
+    const user = await User.create({
+      name,
+      email,
+      password,
+      role: role || 'admin',
+    });
+    
+    res.status(201).json({
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
       },
       token: 'mock-jwt-token',
     });
-  } else {
-    res.status(401).json({ message: 'Invalid credentials' });
+  } catch (error) {
+    console.error('Register error:', error);
+    res.status(500).json({ message: 'Server error' });
   }
 });
 
-app.get('/api/auth/me', (req, res) => {
-  res.json({
-    id: '1',
-    name: 'Admin',
-    email: 'admin@newssketch.com',
-    role: 'admin',
-  });
+// Login
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    console.log('📡 Login attempt:', email);
+    
+    // Check for user
+    const user = await User.findOne({ email }).select('+password');
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+    
+    // Check password
+    const isMatch = await user.matchPassword(password);
+    if (!isMatch) {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+    
+    res.json({
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+      token: 'mock-jwt-token',
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Get current user
+app.get('/api/auth/me', async (req, res) => {
+  try {
+    // For development, return a default user
+    // In production, you'd get the user from the token
+    const user = await User.findOne({ email: 'admin@newssketch.com' });
+    if (user) {
+      res.json({
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      });
+    } else {
+      // Create default admin if not exists
+      const newUser = await User.create({
+        name: 'Admin',
+        email: 'admin@newssketch.com',
+        password: 'admin123',
+        role: 'admin',
+      });
+      res.json({
+        id: newUser._id,
+        name: newUser.name,
+        email: newUser.email,
+        role: newUser.role,
+      });
+    }
+  } catch (error) {
+    console.error('Get user error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
 });
 
 app.post('/api/auth/logout', (req, res) => {
@@ -393,80 +293,136 @@ app.post('/api/auth/logout', (req, res) => {
 });
 
 // ============================================
-// POST ROUTES
+// POST ROUTES - WITH REAL DATABASE
 // ============================================
 
-app.get('/api/posts', (req, res) => {
-  const { page = 1, limit = 10, category, featured, sort = '-createdAt' } = req.query;
-  let posts = [...mockPosts];
-  
-  if (category) {
-    posts = posts.filter(p => p.category._id === category || p.category.slug === category);
-  }
-  
-  if (featured === 'true') {
-    posts = posts.filter(p => p.featured === true);
-  }
-  
-  if (sort === '-views') {
-    posts.sort((a, b) => b.views - a.views);
-  } else if (sort === '-createdAt') {
-    posts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  }
-  
-  const start = (parseInt(page) - 1) * parseInt(limit);
-  const end = start + parseInt(limit);
-  const paginatedPosts = posts.slice(start, end);
-  
-  res.json({
-    posts: paginatedPosts,
-    total: posts.length,
-    totalPages: Math.ceil(posts.length / parseInt(limit)),
-    currentPage: parseInt(page),
-  });
-});
-
-app.get('/api/posts/related', (req, res) => {
-  const { category, exclude } = req.query;
-  
-  if (!category) {
-    return res.status(400).json({ message: 'Category parameter is required' });
-  }
-  
-  let posts = mockPosts.filter(p => 
-    p._id !== exclude && 
-    (p.category._id === category || p.category.slug === category)
-  );
-  
-  res.json(posts.slice(0, 3));
-});
-
-app.get('/api/posts/:slug', (req, res) => {
-  const slug = req.params.slug;
-  const post = mockPosts.find(p => p.slug === slug);
-  if (!post) {
-    return res.status(404).json({ message: 'Post not found' });
-  }
-  post.views += 1;
-  res.json(post);
-});
-
-app.get('/api/posts/id/:id', (req, res) => {
-  const post = mockPosts.find(p => p._id === req.params.id);
-  if (!post) {
-    return res.status(404).json({ message: 'Post not found' });
-  }
-  res.json(post);
-});
-
-app.post('/api/posts', uploadImage.single('image'), (req, res) => {
-  console.log('📡 POST /api/posts - Creating new post');
-  console.log('📦 Request body:', req.body);
-  console.log('📎 Uploaded file:', req.file);
-  
+// GET all posts
+app.get('/api/posts', async (req, res) => {
   try {
+    const { page = 1, limit = 10, category, featured, sort = '-createdAt' } = req.query;
+    
+    // Build query
+    const query = {};
+    if (category) {
+      const categoryDoc = await Category.findOne({ slug: category });
+      if (categoryDoc) {
+        query.category = categoryDoc._id;
+      }
+    }
+    if (featured === 'true') {
+      query.featured = true;
+    }
+    query.published = true;
+    
+    // Sort
+    let sortOption = {};
+    if (sort === '-views') {
+      sortOption = { views: -1 };
+    } else if (sort === 'views') {
+      sortOption = { views: 1 };
+    } else if (sort === '-createdAt') {
+      sortOption = { createdAt: -1 };
+    } else {
+      sortOption = { createdAt: -1 };
+    }
+    
+    const posts = await Post.find(query)
+      .populate('category', 'name slug')
+      .populate('author', 'name')
+      .sort(sortOption)
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit));
+    
+    const total = await Post.countDocuments(query);
+    
+    res.json({
+      posts,
+      total,
+      totalPages: Math.ceil(total / parseInt(limit)),
+      currentPage: parseInt(page),
+    });
+  } catch (error) {
+    console.error('Error fetching posts:', error);
+    res.status(500).json({ message: 'Failed to fetch posts' });
+  }
+});
+
+// GET related posts
+app.get('/api/posts/related', async (req, res) => {
+  try {
+    const { category, exclude } = req.query;
+    
+    if (!category) {
+      return res.status(400).json({ message: 'Category parameter is required' });
+    }
+    
+    const posts = await Post.find({
+      category: category,
+      _id: { $ne: exclude },
+      published: true,
+    })
+      .populate('category', 'name slug')
+      .populate('author', 'name')
+      .limit(3)
+      .sort({ createdAt: -1 });
+    
+    res.json(posts);
+  } catch (error) {
+    console.error('Error fetching related posts:', error);
+    res.status(500).json({ message: 'Failed to fetch related posts' });
+  }
+});
+
+// GET single post by slug
+app.get('/api/posts/:slug', async (req, res) => {
+  try {
+    const post = await Post.findOne({ slug: req.params.slug, published: true })
+      .populate('category', 'name slug')
+      .populate('author', 'name');
+    
+    if (!post) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+    
+    // Increment views
+    post.views += 1;
+    await post.save();
+    
+    res.json(post);
+  } catch (error) {
+    console.error('Error fetching post:', error);
+    res.status(500).json({ message: 'Failed to fetch post' });
+  }
+});
+
+// GET post by ID
+app.get('/api/posts/id/:id', async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id)
+      .populate('category', 'name slug')
+      .populate('author', 'name');
+    
+    if (!post) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+    
+    res.json(post);
+  } catch (error) {
+    console.error('Error fetching post by ID:', error);
+    res.status(500).json({ message: 'Failed to fetch post' });
+  }
+});
+
+// POST create new post
+app.post('/api/posts', uploadImage.single('image'), async (req, res) => {
+  try {
+    console.log('📡 POST /api/posts - Creating new post');
+    console.log('📦 Request body:', req.body);
+    console.log('📎 Uploaded file:', req.file);
+    
     const { title, content, category, tags, metaTitle, metaDescription, slug: customSlug } = req.body;
     
+    // Validate required fields
     if (!title) {
       return res.status(400).json({ message: 'Title is required' });
     }
@@ -477,6 +433,7 @@ app.post('/api/posts', uploadImage.single('image'), (req, res) => {
       return res.status(400).json({ message: 'Category is required' });
     }
     
+    // Parse tags
     let parsedTags = tags;
     if (typeof tags === 'string') {
       try {
@@ -486,8 +443,17 @@ app.post('/api/posts', uploadImage.single('image'), (req, res) => {
       }
     }
     
-    const categoryObj = mockCategories.find(c => c._id === category);
+    // Generate slug
+    let slug = customSlug || title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    slug = slug.replace(/^-+|-+$/g, '');
     
+    // Check if slug exists
+    const existingPost = await Post.findOne({ slug });
+    if (existingPost) {
+      slug = slug + '-' + Date.now();
+    }
+    
+    // Handle image
     let imageUrl = '/placeholder.svg';
     let publicId = 'placeholder';
     if (req.file) {
@@ -495,32 +461,24 @@ app.post('/api/posts', uploadImage.single('image'), (req, res) => {
       publicId = req.file.filename;
     }
     
-    const newPost = {
-      _id: String(mockPosts.length + 1),
-      title: title,
-      slug: customSlug || title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+    // Create post
+    const post = await Post.create({
+      title,
+      slug,
+      content,
       excerpt: content.replace(/<[^>]*>/g, '').slice(0, 150) + '...',
-      content: content,
-      category: categoryObj || { _id: category, name: 'Category', slug: 'category' },
-      author: { _id: '1', name: 'Admin' },
-      views: 0,
-      readingTime: Math.ceil(content.replace(/<[^>]*>/g, '').split(' ').length / 200) || 2,
+      image: { url: imageUrl, publicId },
+      category,
       tags: parsedTags || [],
+      author: '67d8e3f5a1b2c3d4e5f6a7b8', // Replace with actual user ID
       metaTitle: metaTitle || title,
       metaDescription: metaDescription || content.replace(/<[^>]*>/g, '').slice(0, 160),
-      image: { 
-        url: imageUrl,
-        publicId: publicId
-      },
-      createdAt: new Date().toISOString(),
+      readingTime: Math.ceil(content.replace(/<[^>]*>/g, '').split(' ').length / 200) || 2,
       published: true,
-      featured: false,
-    };
+    });
     
-    mockPosts.unshift(newPost);
-    
-    console.log('✅ Post created:', newPost._id);
-    res.status(201).json(newPost);
+    console.log('✅ Post created:', post._id);
+    res.status(201).json(post);
   } catch (error) {
     console.error('❌ Error creating post:', error);
     res.status(500).json({ 
@@ -530,332 +488,321 @@ app.post('/api/posts', uploadImage.single('image'), (req, res) => {
   }
 });
 
-app.put('/api/posts/id/:id', uploadImage.single('image'), (req, res) => {
-  const { id } = req.params;
-  console.log('📡 PUT /api/posts/id/:id:', id);
-  
-  const index = mockPosts.findIndex(p => p._id === id);
-  if (index === -1) {
-    return res.status(404).json({ message: 'Post not found' });
-  }
-  
-  const { title, content, category, tags, metaTitle, metaDescription, slug: customSlug } = req.body;
-  
-  let imageUrl = mockPosts[index].image?.url || '/placeholder.svg';
-  let publicId = mockPosts[index].image?.publicId || 'placeholder';
-  if (req.file) {
-    imageUrl = `/uploads/${req.file.filename}`;
-    publicId = req.file.filename;
-  }
-  
-  mockPosts[index] = {
-    ...mockPosts[index],
-    title: title || mockPosts[index].title,
-    content: content || mockPosts[index].content,
-    category: category ? mockCategories.find(c => c._id === category) || mockPosts[index].category : mockPosts[index].category,
-    tags: tags ? (typeof tags === 'string' ? tags.split(',').map(t => t.trim()) : tags) : mockPosts[index].tags,
-    metaTitle: metaTitle || mockPosts[index].metaTitle,
-    metaDescription: metaDescription || mockPosts[index].metaDescription,
-    slug: customSlug || mockPosts[index].slug,
-    image: { 
-      url: imageUrl,
-      publicId: publicId
-    },
-  };
-  
-  console.log('✅ Post updated:', id);
-  res.json(mockPosts[index]);
-});
-
-app.delete('/api/posts/id/:id', (req, res) => {
-  const { id } = req.params;
-  console.log('📡 DELETE /api/posts/id/:id:', id);
-  
-  const index = mockPosts.findIndex(p => p._id === id);
-  if (index === -1) {
-    return res.status(404).json({ message: 'Post not found' });
-  }
-  
-  mockPosts.splice(index, 1);
-  console.log('✅ Post deleted:', id);
-  res.json({ message: 'Post deleted successfully' });
-});
-
-// ============================================
-// CATEGORY ROUTES
-// ============================================
-
-app.get('/api/categories', (req, res) => {
-  res.json(mockCategories);
-});
-
-app.get('/api/categories/:slug/posts', (req, res) => {
-  const category = mockCategories.find(c => c.slug === req.params.slug);
-  if (!category) {
-    return res.status(404).json({ message: 'Category not found' });
-  }
-  const posts = mockPosts.filter(p => p.category._id === category._id);
-  res.json({ category, posts });
-});
-
-app.post('/api/categories', (req, res) => {
-  const { name, description } = req.body;
-  const newCategory = {
-    _id: String(mockCategories.length + 1),
-    name,
-    slug: name.toLowerCase().replace(/\s+/g, '-'),
-    description: description || '',
-  };
-  mockCategories.push(newCategory);
-  res.status(201).json(newCategory);
-});
-
-app.put('/api/categories/:id', (req, res) => {
-  const { id } = req.params;
-  const index = mockCategories.findIndex(c => c._id === id);
-  if (index === -1) {
-    return res.status(404).json({ message: 'Category not found' });
-  }
-  mockCategories[index] = { ...mockCategories[index], ...req.body };
-  res.json(mockCategories[index]);
-});
-
-app.delete('/api/categories/:id', (req, res) => {
-  const { id } = req.params;
-  const index = mockCategories.findIndex(c => c._id === id);
-  if (index === -1) {
-    return res.status(404).json({ message: 'Category not found' });
-  }
-  mockCategories.splice(index, 1);
-  res.json({ message: 'Category deleted successfully' });
-});
-
-// ============================================
-// COMMENT ROUTES
-// ============================================
-
-app.get('/api/comments', (req, res) => {
-  const { post } = req.query;
-  let comments = [...mockComments];
-  if (post) {
-    comments = comments.filter(c => c.post === post);
-  }
-  res.json(comments);
-});
-
-app.post('/api/comments', (req, res) => {
-  const { content, postId } = req.body;
-  if (!content || !postId) {
-    return res.status(400).json({ message: 'Content and postId are required' });
-  }
-  const newComment = {
-    _id: String(mockComments.length + 1),
-    content,
-    author: { _id: '1', name: 'Current User' },
-    post: postId,
-    createdAt: new Date().toISOString(),
-  };
-  mockComments.push(newComment);
-  res.status(201).json(newComment);
-});
-
-// ============================================
-// VIDEO ROUTES
-// ============================================
-
-app.get('/api/videos', (req, res) => {
-  const { page = 1, limit = 10, type } = req.query;
-  let videos = [...mockVideos];
-  
-  if (type) {
-    videos = videos.filter(v => v.type === type);
-  }
-  
-  const start = (parseInt(page) - 1) * parseInt(limit);
-  const end = start + parseInt(limit);
-  const paginatedVideos = videos.slice(start, end);
-  
-  res.json({
-    videos: paginatedVideos,
-    total: videos.length,
-    totalPages: Math.ceil(videos.length / parseInt(limit)),
-    currentPage: parseInt(page),
-  });
-});
-
-app.get('/api/videos/:id', (req, res) => {
-  const video = mockVideos.find(v => v._id === req.params.id);
-  if (!video) {
-    return res.status(404).json({ message: 'Video not found' });
-  }
-  video.views += 1;
-  res.json(video);
-});
-
-app.post('/api/videos/upload', uploadVideo.single('video'), (req, res) => {
-  console.log('📡 POST /api/videos/upload');
-  console.log('📦 Request body:', req.body);
-  
-  if (req.file) {
-    console.log('📎 File uploaded:', req.file.filename, req.file.size, 'bytes');
-  } else {
-    console.log('⚠️ No file uploaded');
-  }
-  
-  const { title, description } = req.body;
-  
-  if (!title) {
+// PUT update post
+app.put('/api/posts/id/:id', uploadImage.single('image'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log('📡 PUT /api/posts/id/:id:', id);
+    
+    const post = await Post.findById(id);
+    if (!post) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+    
+    const { title, content, category, tags, metaTitle, metaDescription, slug: customSlug } = req.body;
+    
+    // Handle image
+    let imageUrl = post.image?.url || '/placeholder.svg';
+    let publicId = post.image?.publicId || 'placeholder';
     if (req.file) {
-      fs.unlink(req.file.path, (err) => {
-        if (err) console.error('Error deleting file:', err);
+      imageUrl = `/uploads/${req.file.filename}`;
+      publicId = req.file.filename;
+    }
+    
+    // Update post
+    post.title = title || post.title;
+    post.content = content || post.content;
+    post.category = category || post.category;
+    post.tags = tags ? (typeof tags === 'string' ? tags.split(',').map(t => t.trim()) : tags) : post.tags;
+    post.metaTitle = metaTitle || post.metaTitle;
+    post.metaDescription = metaDescription || post.metaDescription;
+    if (customSlug) {
+      post.slug = customSlug;
+    }
+    post.image = { url: imageUrl, publicId };
+    
+    await post.save();
+    
+    console.log('✅ Post updated:', id);
+    res.json(post);
+  } catch (error) {
+    console.error('Error updating post:', error);
+    res.status(500).json({ message: 'Failed to update post' });
+  }
+});
+
+// DELETE post
+app.delete('/api/posts/id/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log('📡 DELETE /api/posts/id/:id:', id);
+    
+    const post = await Post.findById(id);
+    if (!post) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+    
+    await post.deleteOne();
+    console.log('✅ Post deleted:', id);
+    res.json({ message: 'Post deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting post:', error);
+    res.status(500).json({ message: 'Failed to delete post' });
+  }
+});
+
+// ============================================
+// CATEGORY ROUTES - WITH REAL DATABASE
+// ============================================
+
+// GET all categories
+app.get('/api/categories', async (req, res) => {
+  try {
+    const categories = await Category.find().sort({ name: 1 });
+    res.json(categories);
+  } catch (error) {
+    console.error('Error fetching categories:', error);
+    res.status(500).json({ message: 'Failed to fetch categories' });
+  }
+});
+
+// GET posts by category slug
+app.get('/api/categories/:slug/posts', async (req, res) => {
+  try {
+    const category = await Category.findOne({ slug: req.params.slug });
+    if (!category) {
+      return res.status(404).json({ message: 'Category not found' });
+    }
+    
+    const posts = await Post.find({ 
+      category: category._id, 
+      published: true 
+    })
+      .populate('author', 'name')
+      .sort({ createdAt: -1 });
+    
+    res.json({ category, posts });
+  } catch (error) {
+    console.error('Error fetching category posts:', error);
+    res.status(500).json({ message: 'Failed to fetch category posts' });
+  }
+});
+
+// POST create category
+app.post('/api/categories', async (req, res) => {
+  try {
+    const { name, description } = req.body;
+    
+    if (!name) {
+      return res.status(400).json({ message: 'Name is required' });
+    }
+    
+    const category = await Category.create({
+      name,
+      description: description || '',
+    });
+    
+    res.status(201).json(category);
+  } catch (error) {
+    console.error('Error creating category:', error);
+    res.status(500).json({ message: 'Failed to create category' });
+  }
+});
+
+// PUT update category
+app.put('/api/categories/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description } = req.body;
+    
+    const category = await Category.findById(id);
+    if (!category) {
+      return res.status(404).json({ message: 'Category not found' });
+    }
+    
+    category.name = name || category.name;
+    category.description = description !== undefined ? description : category.description;
+    
+    await category.save();
+    res.json(category);
+  } catch (error) {
+    console.error('Error updating category:', error);
+    res.status(500).json({ message: 'Failed to update category' });
+  }
+});
+
+// DELETE category
+app.delete('/api/categories/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const category = await Category.findById(id);
+    if (!category) {
+      return res.status(404).json({ message: 'Category not found' });
+    }
+    
+    await category.deleteOne();
+    res.json({ message: 'Category deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting category:', error);
+    res.status(500).json({ message: 'Failed to delete category' });
+  }
+});
+
+// ============================================
+// COMMENT ROUTES - WITH REAL DATABASE
+// ============================================
+
+// GET comments for a post
+app.get('/api/comments', async (req, res) => {
+  try {
+    const { post } = req.query;
+    const query = post ? { post } : {};
+    
+    const comments = await Comment.find(query)
+      .populate('author', 'name')
+      .sort({ createdAt: -1 });
+    
+    res.json(comments);
+  } catch (error) {
+    console.error('Error fetching comments:', error);
+    res.status(500).json({ message: 'Failed to fetch comments' });
+  }
+});
+
+// POST create comment
+app.post('/api/comments', async (req, res) => {
+  try {
+    const { content, postId } = req.body;
+    
+    if (!content || !postId) {
+      return res.status(400).json({ message: 'Content and postId are required' });
+    }
+    
+    // Get author from request (for now, use a default user)
+    let author = await User.findOne({ email: 'admin@newssketch.com' });
+    if (!author) {
+      author = await User.create({
+        name: 'Admin',
+        email: 'admin@newssketch.com',
+        password: 'admin123',
+        role: 'admin',
       });
     }
-    return res.status(400).json({ message: 'Title is required' });
+    
+    const comment = await Comment.create({
+      content,
+      author: author._id,
+      post: postId,
+    });
+    
+    const populatedComment = await Comment.findById(comment._id)
+      .populate('author', 'name');
+    
+    res.status(201).json(populatedComment);
+  } catch (error) {
+    console.error('Error creating comment:', error);
+    res.status(500).json({ message: 'Failed to create comment' });
   }
-  
-  const newVideo = {
-    _id: String(mockVideos.length + 1),
-    title,
-    description: description || '',
-    type: 'upload',
-    fileUrl: req.file ? `/uploads/${req.file.filename}` : null,
-    fileSize: req.file ? req.file.size : 0,
-    mimeType: req.file ? req.file.mimetype : null,
-    views: 0,
-    uploadedBy: { _id: '1', name: 'Admin' },
-    createdAt: new Date().toISOString(),
-    status: 'active',
-  };
-  
-  mockVideos.unshift(newVideo);
-  console.log('✅ Video created:', newVideo._id);
-  res.status(201).json(newVideo);
-});
-
-app.post('/api/videos/youtube', (req, res) => {
-  console.log('📡 POST /api/videos/youtube');
-  console.log('📦 Request body:', req.body);
-  
-  const { title, description, youtubeUrl } = req.body;
-  
-  if (!title) {
-    return res.status(400).json({ message: 'Title is required' });
-  }
-  if (!youtubeUrl) {
-    return res.status(400).json({ message: 'YouTube URL is required' });
-  }
-  
-  const youtubeRegex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
-  const match = youtubeUrl.match(youtubeRegex);
-  
-  if (!match) {
-    return res.status(400).json({ message: 'Invalid YouTube URL. Please use format: https://www.youtube.com/watch?v=VIDEO_ID' });
-  }
-  
-  const youtubeId = match[1];
-  
-  const newVideo = {
-    _id: String(mockVideos.length + 1),
-    title,
-    description: description || '',
-    type: 'youtube',
-    youtubeId,
-    youtubeUrl: `https://www.youtube.com/watch?v=${youtubeId}`,
-    thumbnail: `https://img.youtube.com/vi/${youtubeId}/maxresdefault.jpg`,
-    views: 0,
-    uploadedBy: { _id: '1', name: 'Admin' },
-    createdAt: new Date().toISOString(),
-    status: 'active',
-  };
-  
-  mockVideos.unshift(newVideo);
-  console.log('✅ YouTube video added:', newVideo._id);
-  res.status(201).json(newVideo);
-});
-
-app.delete('/api/videos/:id', (req, res) => {
-  console.log('📡 DELETE /api/videos/:id:', req.params.id);
-  
-  const index = mockVideos.findIndex(v => v._id === req.params.id);
-  if (index === -1) {
-    return res.status(404).json({ message: 'Video not found' });
-  }
-  
-  mockVideos.splice(index, 1);
-  console.log('✅ Video deleted:', req.params.id);
-  res.json({ message: 'Video deleted successfully' });
 });
 
 // ============================================
 // SEARCH ROUTE
 // ============================================
 
-app.get('/api/search', (req, res) => {
-  const { q } = req.query;
-  if (!q) {
-    return res.status(400).json({ message: 'Query parameter q is required' });
+app.get('/api/search', async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q) {
+      return res.status(400).json({ message: 'Query parameter q is required' });
+    }
+    
+    const posts = await Post.find({
+      $text: { $search: q },
+      published: true,
+    })
+      .populate('category', 'name slug')
+      .populate('author', 'name')
+      .sort({ score: { $meta: 'textScore' } })
+      .limit(20);
+    
+    res.json(posts);
+  } catch (error) {
+    console.error('Error searching:', error);
+    res.status(500).json({ message: 'Failed to search' });
   }
-  const results = mockPosts.filter(p => 
-    p.title.toLowerCase().includes(q.toLowerCase()) ||
-    p.content.toLowerCase().includes(q.toLowerCase()) ||
-    p.excerpt?.toLowerCase().includes(q.toLowerCase())
-  );
-  res.json(results);
 });
 
 // ============================================
 // ADMIN STATS
 // ============================================
 
-app.get('/api/admin/stats', (req, res) => {
-  const totalPosts = mockPosts.length;
-  const totalViews = mockPosts.reduce((sum, post) => sum + (post.views || 0), 0);
-  const totalComments = mockComments.length;
-  const totalVisitors = 1234;
-  
-  const mostRead = [...mockPosts]
-    .sort((a, b) => (b.views || 0) - (a.views || 0))
-    .slice(0, 5)
-    .map(post => ({
-      title: post.title,
-      slug: post.slug,
-      views: post.views || 0,
-    }));
-  
-  const categoryCounts = {};
-  mockPosts.forEach(post => {
-    const catName = post.category?.name || 'Uncategorized';
-    categoryCounts[catName] = (categoryCounts[catName] || 0) + 1;
-  });
-  
-  res.json({
-    posts: totalPosts,
-    views: totalViews,
-    comments: totalComments,
-    visitors: totalVisitors,
-    mostRead,
-    categories: Object.keys(categoryCounts).map(name => ({
-      name,
-      count: categoryCounts[name],
-    })),
-    chartData: {
-      views: [120, 150, 180, 220, 190, 240, 210],
-    },
-  });
+app.get('/api/admin/stats', async (req, res) => {
+  try {
+    const totalPosts = await Post.countDocuments();
+    const totalComments = await Comment.countDocuments();
+    const totalCategories = await Category.countDocuments();
+    const totalViews = await Post.aggregate([
+      { $group: { _id: null, total: { $sum: '$views' } } }
+    ]);
+    
+    // Most read posts
+    const mostRead = await Post.find({ published: true })
+      .sort({ views: -1 })
+      .limit(5)
+      .select('title slug views');
+    
+    // Category counts
+    const categoryCounts = await Post.aggregate([
+      { $group: { _id: '$category', count: { $sum: 1 } } },
+      { $lookup: { from: 'categories', localField: '_id', foreignField: '_id', as: 'category' } },
+      { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } },
+      { $project: { name: '$category.name', count: 1 } }
+    ]);
+    
+    res.json({
+      posts: totalPosts,
+      views: totalViews[0]?.total || 0,
+      comments: totalComments,
+      visitors: 1234, // Mock for now
+      mostRead,
+      categories: categoryCounts,
+      chartData: {
+        views: [120, 150, 180, 220, 190, 240, 210],
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching stats:', error);
+    res.status(500).json({ message: 'Failed to fetch stats' });
+  }
 });
 
 // ============================================
 // TEST ROUTE
 // ============================================
 
-app.get('/api/test', (req, res) => {
+app.get('/api/test', async (req, res) => {
+  const dbStatus = mongoose.connection.readyState;
+  const statusMap = {
+    0: 'disconnected',
+    1: 'connected',
+    2: 'connecting',
+    3: 'disconnecting'
+  };
+  
+  const postCount = await Post.countDocuments();
+  const categoryCount = await Category.countDocuments();
+  const userCount = await User.countDocuments();
+  
   res.json({
     message: 'News Sketch API Server',
     status: 'running',
     timestamp: new Date().toISOString(),
-    mongodb: isConnected ? 'connected' : 'disconnected',
-    postsCount: mockPosts.length,
-    videosCount: mockVideos.length,
+    mongodb: statusMap[dbStatus] || 'unknown',
+    database: {
+      posts: postCount,
+      categories: categoryCount,
+      users: userCount,
+    },
     cors: {
       origins: allowedOrigins.filter(Boolean),
       credentials: true,
@@ -867,7 +814,6 @@ app.get('/api/test', (req, res) => {
       related: '/api/posts/related?category=:id&exclude=:id',
       categories: '/api/categories',
       comments: '/api/comments',
-      videos: '/api/videos',
       search: '/api/search',
       adminStats: '/api/admin/stats',
       auth: '/api/auth/login',
@@ -900,20 +846,9 @@ app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     if (err.code === 'FILE_TOO_LARGE') {
       return res.status(400).json({ 
-        message: err.fieldname === 'video' 
-          ? 'Video file too large. Max size is 500MB.' 
-          : 'Image file too large. Max size is 10MB.' 
+        message: 'Image file too large. Max size is 10MB.' 
       });
     }
-    if (err.code === 'LIMIT_UNEXPECTED_FILE') {
-      return res.status(400).json({ 
-        message: `Unexpected field: ${err.field}. Please use the correct field name.` 
-      });
-    }
-    return res.status(400).json({ message: err.message });
-  }
-  
-  if (err.message && err.message.includes('Only')) {
     return res.status(400).json({ message: err.message });
   }
   
@@ -937,6 +872,7 @@ app.listen(PORT, () => {
   console.log(`   GET  /`);
   console.log(`   GET  /health`);
   console.log(`   GET  /api/test`);
+  console.log(`   POST /api/auth/register`);
   console.log(`   POST /api/auth/login`);
   console.log(`   GET  /api/auth/me`);
   console.log(`   GET  /api/posts`);
@@ -950,11 +886,6 @@ app.listen(PORT, () => {
   console.log(`   GET  /api/categories/:slug/posts`);
   console.log(`   GET  /api/comments`);
   console.log(`   POST /api/comments`);
-  console.log(`   GET  /api/videos`);
-  console.log(`   GET  /api/videos/:id`);
-  console.log(`   POST /api/videos/upload`);
-  console.log(`   POST /api/videos/youtube`);
-  console.log(`   DELETE /api/videos/:id`);
   console.log(`   GET  /api/search`);
   console.log(`   GET  /api/admin/stats`);
   console.log(`\n✅ CORS configured for:`, allowedOrigins.filter(Boolean));
