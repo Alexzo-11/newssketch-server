@@ -21,16 +21,4 @@ const CategorySchema = new mongoose.Schema({
   timestamps: true,
 });
 
-// Create slug from name before saving
-CategorySchema.pre('save', function(next) {
-  if (this.isModified('name') && this.name) {
-    this.slug = this.name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '');
-  }
-  // Always call next() to proceed
-  next();
-});
-
 module.exports = mongoose.model('Category', CategorySchema);

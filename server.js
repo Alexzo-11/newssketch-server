@@ -576,17 +576,27 @@ app.post('/api/categories', async (req, res) => {
       return res.status(400).json({ message: 'Name is required' });
     }
     
+    // Generate slug manually
+    const slug = name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    
     // Check if category already exists
-    const existingCategory = await Category.findOne({ name: name.trim() });
+    const existingCategory = await Category.findOne({ 
+      $or: [{ name: name.trim() }, { slug }] 
+    });
     if (existingCategory) {
       return res.status(400).json({ message: 'Category already exists' });
     }
     
-    const category = await Category.create({
+    const category = new Category({
       name: name.trim(),
+      slug: slug,
       description: description ? description.trim() : '',
     });
     
+    await category.save();
     res.status(201).json(category);
   } catch (error) {
     console.error('Error creating category:', error);
