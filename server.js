@@ -428,7 +428,7 @@ app.post('/api/posts', uploadImage.single('image'), async (req, res) => {
     // Set a timeout for the entire operation
     req.setTimeout(120000);
     
-    const { title, content, category, tags, metaTitle, metaDescription, slug: customSlug } = req.body;
+    const { title, content, category, tags, metaTitle, metaDescription, slug: customSlug, featured } = req.body;
     
     if (!title) {
       return res.status(400).json({ message: 'Title is required' });
@@ -482,6 +482,7 @@ app.post('/api/posts', uploadImage.single('image'), async (req, res) => {
       metaDescription: metaDescription || content.replace(/<[^>]*>/g, '').slice(0, 160),
       readingTime: Math.ceil(content.replace(/<[^>]*>/g, '').split(' ').length / 200) || 2,
       published: true,
+      featured: featured === 'true' || featured === true,
     });
     
     console.log('✅ Post created:', post._id);
@@ -504,7 +505,7 @@ app.put('/api/posts/id/:id', uploadImage.single('image'), async (req, res) => {
       return res.status(404).json({ message: 'Post not found' });
     }
     
-    const { title, content, category, tags, metaTitle, metaDescription, slug: customSlug } = req.body;
+    const { title, content, category, tags, metaTitle, metaDescription, slug: customSlug, featured } = req.body;
     
     let imageUrl = post.image?.url || '/placeholder.svg';
     let publicId = post.image?.publicId || 'placeholder';
@@ -521,6 +522,7 @@ app.put('/api/posts/id/:id', uploadImage.single('image'), async (req, res) => {
     post.metaDescription = metaDescription || post.metaDescription;
     if (customSlug) post.slug = customSlug;
     post.image = { url: imageUrl, publicId };
+    if (featured !== undefined) post.featured = featured === 'true' || featured === true;
     
     await post.save();
     res.json(post);
@@ -817,14 +819,20 @@ app.post('/api/videos/youtube', async (req, res) => {
     
     const youtubeId = match[1];
     
+    // Check if video already exists
+    const existingVideo = await Video.findOne({ youtubeId });
+    if (existingVideo) {
+      return res.status(400).json({ message: 'This YouTube video has already been added' });
+    }
+    
     const adminUser = await User.findOne({ email: 'admin@newssketch.com' });
     if (!adminUser) {
       return res.status(400).json({ message: 'Admin user not found' });
     }
     
     const video = await Video.create({
-      title,
-      description: description || '',
+      title: title.trim(),
+      description: description ? description.trim() : '',
       type: 'youtube',
       youtubeId,
       youtubeUrl: `https://www.youtube.com/watch?v=${youtubeId}`,
