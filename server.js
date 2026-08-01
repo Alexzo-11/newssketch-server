@@ -456,10 +456,14 @@ app.post('/api/posts', uploadImage.single('image'), async (req, res) => {
       slug = slug + '-' + Date.now();
     }
     
+    const baseUrl = process.env.NODE_ENV === 'production' 
+      ? 'https://newssketch-api.onrender.com' 
+      : 'http://localhost:5000';
+    
     let imageUrl = '/placeholder.svg';
     let publicId = 'placeholder';
     if (req.file) {
-      imageUrl = `/uploads/${req.file.filename}`;
+      imageUrl = `${baseUrl}/uploads/${req.file.filename}`;
       publicId = req.file.filename;
       console.log('📎 Image uploaded:', req.file.filename);
     }
@@ -507,10 +511,14 @@ app.put('/api/posts/id/:id', uploadImage.single('image'), async (req, res) => {
     
     const { title, content, category, tags, metaTitle, metaDescription, slug: customSlug, featured } = req.body;
     
+    const baseUrl = process.env.NODE_ENV === 'production' 
+      ? 'https://newssketch-api.onrender.com' 
+      : 'http://localhost:5000';
+    
     let imageUrl = post.image?.url || '/placeholder.svg';
     let publicId = post.image?.publicId || 'placeholder';
     if (req.file) {
-      imageUrl = `/uploads/${req.file.filename}`;
+      imageUrl = `${baseUrl}/uploads/${req.file.filename}`;
       publicId = req.file.filename;
     }
     
@@ -703,7 +711,7 @@ app.post('/api/comments', async (req, res) => {
 app.get('/api/videos', async (req, res) => {
   try {
     const { page = 1, limit = 10, type } = req.query;
-    const query = {};
+    const query = { status: 'active' };
     if (type) query.type = type;
     
     const videos = await Video.find(query)
@@ -736,7 +744,11 @@ app.get('/api/videos/featured', async (req, res) => {
       .populate('uploadedBy', 'name')
       .sort({ createdAt: -1 });
     
-    res.json(video || null);
+    if (!video) {
+      return res.status(404).json({ message: 'No featured video found' });
+    }
+    
+    res.json(video);
   } catch (error) {
     console.error('Error fetching featured video:', error);
     res.status(500).json({ message: 'Failed to fetch featured video' });
@@ -777,11 +789,15 @@ app.post('/api/videos/upload', uploadVideo.single('video'), async (req, res) => 
       return res.status(400).json({ message: 'Admin user not found' });
     }
     
+    const baseUrl = process.env.NODE_ENV === 'production' 
+      ? 'https://newssketch-api.onrender.com' 
+      : 'http://localhost:5000';
+    
     let fileUrl = null;
     let fileSize = 0;
     let mimeType = null;
     if (req.file) {
-      fileUrl = `/uploads/${req.file.filename}`;
+      fileUrl = `${baseUrl}/uploads/${req.file.filename}`;
       fileSize = req.file.size;
       mimeType = req.file.mimetype;
     }
@@ -795,6 +811,7 @@ app.post('/api/videos/upload', uploadVideo.single('video'), async (req, res) => 
       mimeType,
       featured: featured === 'true' || featured === true,
       uploadedBy: adminUser._id,
+      status: 'active',
     });
     
     console.log('✅ Video created:', video._id);
@@ -855,6 +872,7 @@ app.post('/api/videos/youtube', async (req, res) => {
       thumbnail: `https://img.youtube.com/vi/${youtubeId}/maxresdefault.jpg`,
       featured: featured === 'true' || featured === true,
       uploadedBy: adminUser._id,
+      status: 'active',
     });
     
     console.log('✅ YouTube video added:', video._id);
