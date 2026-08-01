@@ -58,15 +58,6 @@ const PostSchema = new mongoose.Schema({
   timestamps: true,
 });
 
-// Create slug from title before saving
-PostSchema.pre('save', function(next) {
-  if (this.isModified('title') && this.title && !this.slug) {
-    this.slug = this.title
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '');
-  }
-  next();
-});
+// NO pre-save hook here - slug is generated in the route
 
 module.exports = mongoose.model('Post', PostSchema);

@@ -21,4 +21,6 @@ const CategorySchema = new mongoose.Schema({
   timestamps: true,
 });
 
+// NO pre-save hook here - slug is generated in the route
+
 module.exports = mongoose.model('Category', CategorySchema);
