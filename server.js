@@ -115,7 +115,8 @@ app.get('/', (req, res) => {
         get: 'GET /api/videos/:id',
         upload: 'POST /api/videos/upload',
         youtube: 'POST /api/videos/youtube',
-        delete: 'DELETE /api/videos/:id'
+        delete: 'DELETE /api/videos/:id',
+        featured: 'GET /api/videos/featured'
       },
       search: 'GET /api/search',
       admin: {
@@ -425,7 +426,6 @@ app.post('/api/posts', uploadImage.single('image'), async (req, res) => {
     console.log('📡 POST /api/posts - Creating new post');
     console.log('📦 Request body:', req.body);
     
-    // Set a timeout for the entire operation
     req.setTimeout(120000);
     
     const { title, content, category, tags, metaTitle, metaDescription, slug: customSlug, featured } = req.body;
@@ -586,13 +586,11 @@ app.post('/api/categories', async (req, res) => {
       return res.status(400).json({ message: 'Name is required' });
     }
     
-    // Generate slug manually
     const slug = name
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '');
     
-    // Check if category already exists
     const existingCategory = await Category.findOne({ 
       $or: [{ name: name.trim() }, { slug }] 
     });
@@ -728,6 +726,23 @@ app.get('/api/videos', async (req, res) => {
   }
 });
 
+// GET featured videos
+app.get('/api/videos/featured', async (req, res) => {
+  try {
+    const video = await Video.findOne({ 
+      featured: true,
+      status: 'active'
+    })
+      .populate('uploadedBy', 'name')
+      .sort({ createdAt: -1 });
+    
+    res.json(video || null);
+  } catch (error) {
+    console.error('Error fetching featured video:', error);
+    res.status(500).json({ message: 'Failed to fetch featured video' });
+  }
+});
+
 // GET single video
 app.get('/api/videos/:id', async (req, res) => {
   try {
@@ -751,7 +766,7 @@ app.post('/api/videos/upload', uploadVideo.single('video'), async (req, res) => 
     console.log('📡 POST /api/videos/upload');
     console.log('📦 Request body:', req.body);
     
-    const { title, description } = req.body;
+    const { title, description, featured } = req.body;
     
     if (!title) {
       return res.status(400).json({ message: 'Title is required' });
@@ -778,6 +793,7 @@ app.post('/api/videos/upload', uploadVideo.single('video'), async (req, res) => 
       fileUrl,
       fileSize,
       mimeType,
+      featured: featured === 'true' || featured === true,
       uploadedBy: adminUser._id,
     });
     
@@ -798,7 +814,7 @@ app.post('/api/videos/youtube', async (req, res) => {
     console.log('📡 POST /api/videos/youtube');
     console.log('📦 Request body:', req.body);
     
-    const { title, description, youtubeUrl } = req.body;
+    const { title, description, youtubeUrl, featured } = req.body;
     
     if (!title) {
       return res.status(400).json({ message: 'Title is required' });
@@ -837,6 +853,7 @@ app.post('/api/videos/youtube', async (req, res) => {
       youtubeId,
       youtubeUrl: `https://www.youtube.com/watch?v=${youtubeId}`,
       thumbnail: `https://img.youtube.com/vi/${youtubeId}/maxresdefault.jpg`,
+      featured: featured === 'true' || featured === true,
       uploadedBy: adminUser._id,
     });
     
@@ -1057,6 +1074,7 @@ app.listen(PORT, () => {
   console.log(`   GET  /api/comments`);
   console.log(`   POST /api/comments`);
   console.log(`   GET  /api/videos`);
+  console.log(`   GET  /api/videos/featured`);
   console.log(`   GET  /api/videos/:id`);
   console.log(`   POST /api/videos/upload`);
   console.log(`   POST /api/videos/youtube`);
