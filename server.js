@@ -8,6 +8,7 @@ const mongoose = require('mongoose');
 const multer = require('multer');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
+const cloudinary = require('cloudinary').v2;
 
 // Load models
 const Post = require('./models/Post');
@@ -17,6 +18,13 @@ const Comment = require('./models/Comment');
 const Video = require('./models/Video');
 
 dotenv.config({ path: path.join(__dirname, '.env') });
+
+// Configure Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
 const app = express();
 
@@ -150,68 +158,30 @@ app.get('/health', (req, res) => {
 // MULTER CONFIGURATION
 // ============================================
 
-const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
-// Image upload configuration
-const imageStorage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadDir);
+// Image upload to Cloudinary
+const imageStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'news-sketch/images',
+    allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+    transformation: [{ width: 1200, height: 800, crop: 'limit' }],
   },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'image-' + uniqueSuffix + path.extname(file.originalname));
-  }
 });
 
-const imageFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|gif|webp/;
-  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-  const mimetype = allowedTypes.test(file.mimetype);
-  
-  if (mimetype && extname) {
-    return cb(null, true);
-  } else {
-    cb(new Error('Only image files are allowed (JPEG, PNG, GIF, WebP)'));
-  }
-};
-
-const uploadImage = multer({
-  storage: imageStorage,
-  limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: imageFilter
-});
-
-// Video upload configuration
-const videoStorage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadDir);
+// Video upload to Cloudinary
+const videoStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'news-sketch/videos',
+    resource_type: 'video',
+    allowed_formats: ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'],
   },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'video-' + uniqueSuffix + path.extname(file.originalname));
-  }
 });
 
-const videoFilter = (req, file, cb) => {
-  const allowedTypes = /mp4|webm|ogg|mov|avi|mkv/;
-  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-  const mimetype = allowedTypes.test(file.mimetype);
-  
-  if (mimetype && extname) {
-    return cb(null, true);
-  } else {
-    cb(new Error('Only video files are allowed (MP4, WebM, OGG, MOV, AVI, MKV)'));
-  }
-};
-
-const uploadVideo = multer({
-  storage: videoStorage,
-  limits: { fileSize: 500 * 1024 * 1024 },
-  fileFilter: videoFilter
-});
+const uploadImage = multer({ storage: imageStorage });
+const uploadVideo = multer({ storage: videoStorage });
 
 // ============================================
 // MIDDLEWARE
@@ -221,7 +191,6 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(morgan('dev'));
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ============================================
 // AUTH ROUTES
@@ -456,16 +425,13 @@ app.post('/api/posts', uploadImage.single('image'), async (req, res) => {
       slug = slug + '-' + Date.now();
     }
     
-    const baseUrl = process.env.NODE_ENV === 'production' 
-      ? 'https://newssketch-api.onrender.com' 
-      : 'http://localhost:5000';
-    
+    // Handle image - Cloudinary stores it and returns the URL
     let imageUrl = '/placeholder.svg';
     let publicId = 'placeholder';
     if (req.file) {
-      imageUrl = `${baseUrl}/uploads/${req.file.filename}`;
+      imageUrl = req.file.path; // Cloudinary URL
       publicId = req.file.filename;
-      console.log('📎 Image uploaded:', req.file.filename);
+      console.log('📎 Image uploaded to Cloudinary:', imageUrl);
     }
     
     const adminUser = await User.findOne({ email: 'admin@newssketch.com' });
@@ -511,15 +477,12 @@ app.put('/api/posts/id/:id', uploadImage.single('image'), async (req, res) => {
     
     const { title, content, category, tags, metaTitle, metaDescription, slug: customSlug, featured } = req.body;
     
-    const baseUrl = process.env.NODE_ENV === 'production' 
-      ? 'https://newssketch-api.onrender.com' 
-      : 'http://localhost:5000';
-    
     let imageUrl = post.image?.url || '/placeholder.svg';
     let publicId = post.image?.publicId || 'placeholder';
     if (req.file) {
-      imageUrl = `${baseUrl}/uploads/${req.file.filename}`;
+      imageUrl = req.file.path; // Cloudinary URL
       publicId = req.file.filename;
+      console.log('📎 Image uploaded to Cloudinary:', imageUrl);
     }
     
     post.title = title || post.title;
@@ -789,17 +752,14 @@ app.post('/api/videos/upload', uploadVideo.single('video'), async (req, res) => 
       return res.status(400).json({ message: 'Admin user not found' });
     }
     
-    const baseUrl = process.env.NODE_ENV === 'production' 
-      ? 'https://newssketch-api.onrender.com' 
-      : 'http://localhost:5000';
-    
     let fileUrl = null;
     let fileSize = 0;
     let mimeType = null;
     if (req.file) {
-      fileUrl = `${baseUrl}/uploads/${req.file.filename}`;
+      fileUrl = req.file.path; // Cloudinary URL
       fileSize = req.file.size;
       mimeType = req.file.mimetype;
+      console.log('📎 Video uploaded to Cloudinary:', fileUrl);
     }
     
     const video = await Video.create({
